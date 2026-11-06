@@ -125,7 +125,12 @@ export function HotPanel({ summarize, openExternal }) {
       setChannel((cur) => (cur ? { ...cur, loading: false, data, error: '' } : cur))
     } catch (err) {
       if (controller.signal.aborted) return
-      setChannel((cur) => (cur ? { ...cur, loading: false, error: String(err?.message ?? err) } : cur))
+      const message = String(err?.message ?? err)
+      // 宿主半还没重启时 /x-hot/channel 是 404,给一句能看懂的话
+      const hint = /HTTP 404/.test(message)
+        ? '宿主路由 /x-hot/channel 还没加载:重启一次 dsh web 后可用'
+        : message
+      setChannel((cur) => (cur ? { ...cur, loading: false, error: hint } : cur))
     }
   }, [])
 
