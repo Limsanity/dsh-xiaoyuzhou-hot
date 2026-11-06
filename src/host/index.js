@@ -1,0 +1,173 @@
+/**
+ * 小宇宙热榜 · 宿主侧
+ *
+ * 数据源:中文播客榜(xyzrank)的公开 JSON,免登录。
+ * 浏览器直连会被 CORS 拦掉(xyzrank 不回 Access-Control-Allow-Origin),
+ * 所以由宿主注册同名源的 HTTP 路由做代理,并顺手做 5 分钟内存缓存。
+ *
+ * 路由(都由本插件注册在 dsh-host-webserver 上):
+ *   GET /x-hot/list?kind=podcasts|new|episodes&limit=1..100&offset=0
+ *   GET /x-hot/health
+ */
+export const name = 'xiaoyuzhou-hot'
+
+/** 只依赖 web server,不碰 agent / tools,尽量轻。 */
+export const inject = ['webServer']
+
+const UPSTREAM = 'https://xyzrank.com/api'
+const KINDS = {
+  podcasts: 'podcasts',
+  new: 'new-podcasts',
+  episodes: 'episodes',
+  'new-episodes': 'new-episodes',
+}
+const TTL_MS = 5 * 60 * 1000
+const TIMEOUT_MS = 20_000
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
+
+function sendJson(res, status, body) {
+  const payload = JSON.stringify(body)
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(payload),
+  })
+  res.end(payload)
+}
+
+function clampInt(value, fallback, min, max) {
+  const n = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
+}
+
+function xyzLink(item) {
+  return Array.isArray(item?.links) ? item.links.find((l) => l?.name === 'xyz')?.url ?? '' : ''
+}
+
+function normalizePodcast(item) {
+  return {
+    rank: item?.rank ?? 0,
+    title: item?.name ?? '',
+    author: item?.authorsText ?? '',
+    genre: item?.primaryGenreName ?? '',
+    episodes: item?.trackCount ?? 0,
+    avgPlay: item?.avgPlayCount ?? 0,
+    openRate: item?.avgOpenRate ?? 0,
+    comments: item?.avgCommentCount ?? 0,
+    url: xyzLink(item),
+    logo: item?.logoURL ?? '',
+  }
+}
+
+function normalizeEpisode(item) {
+  return {
+    rank: item?.rank ?? 0,
+    title: item?.title ?? '',
+    author: item?.podcastName ?? '',
+    genre: item?.primaryGenreName ?? '',
+    avgPlay: item?.playCount ?? 0,
+    openRate: item?.openRate ?? 0,
+    comments: item?.commentCount ?? 0,
+    url: item?.link ?? '',
+    logo: item?.logoURL ?? '',
+  }
+}
+
+export function apply(ctx, config = {}) {
+  /** key -> { at, data } */
+  const cache = new Map()
+  /** key -> Promise,避免并发穿透 */
+  const inflight = new Map()
+  const log = ctx.logger ?? console
+
+  async function fetchUpstream(kind, limit, offset) {
+    const api = KINDS[kind]
+    const url = `${UPSTREAM}/${api}?limit=${limit}&offset=${offset}`
+    const res = await fetch(url, {
+      headers: { 'user-agent': UA, accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!res.ok) throw new Error(`xyzrank ${res.status} ${res.statusText}`)
+    const data = await res.json()
+    const items = Array.isArray(data?.items) ? data.items : []
+    const isEpisode = api.includes('episode')
+    return {
+      items: items.map(isEpisode ? normalizeEpisode : normalizePodcast),
+      total: Number(data?.total ?? items.length),
+      limit: Number(data?.limit ?? limit),
+      offset: Number(data?.offset ?? offset),
+    }
+  }
+
+  async function load(kind, limit, offset) {
+    const key = `${kind}:${limit}:${offset}`
+    const hit = cache.get(key)
+    if (hit && Date.now() - hit.at < TTL_MS) return { ...hit.data, cached: true, fetchedAt: hit.at }
+
+    const pending = inflight.get(key)
+    if (pending) return pending
+
+    const task = fetchUpstream(kind, limit, offset)
+      .then((data) => {
+        const at = Date.now()
+        cache.set(key, { at, data })
+        // 只保留最近 24 个键,免得长期跑内存无界
+        if (cache.size > 24) cache.delete(cache.keys().next().value)
+        return { ...data, cached: false, fetchedAt: at }
+      })
+      .catch((error) => {
+        // 上游挂了但手里有旧数据:降级返回,面板不至于空屏
+        if (hit) {
+          log.warn?.(`xiaoyuzhou-hot: upstream failed, serving stale (${error?.message ?? error})`)
+          return { ...hit.data, cached: true, stale: true, fetchedAt: hit.at }
+        }
+        throw error
+      })
+      .finally(() => inflight.delete(key))
+
+    inflight.set(key, task)
+    return task
+  }
+
+  const disposers = []
+
+  disposers.push(ctx.webServer.register({
+    kind: 'exact',
+    path: '/x-hot/list',
+    handler: async (req, res) => {
+      if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      try {
+        const url = new URL(req.url ?? '/x-hot/list', 'http://localhost')
+        const kind = KINDS[url.searchParams.get('kind')] ? url.searchParams.get('kind') : 'podcasts'
+        const limit = clampInt(url.searchParams.get('limit'), 50, 1, 100)
+        const offset = clampInt(url.searchParams.get('offset'), 0, 0, 100_000)
+        const data = await load(kind, limit, offset)
+        return sendJson(res, 200, { ok: true, kind, ...data })
+      } catch (error) {
+        log.warn?.(`xiaoyuzhou-hot: ${error?.stack ?? error}`)
+        return sendJson(res, 502, { ok: false, error: String(error?.message ?? error) })
+      }
+    },
+  }))
+
+  disposers.push(ctx.webServer.register({
+    kind: 'exact',
+    path: '/x-hot/health',
+    handler: (req, res) => sendJson(res, 200, { ok: true, plugin: 'xiaoyuzhou-hot', upstream: UPSTREAM }),
+  }))
+
+  // 热重载时先摘掉旧路由,再挂新的;否则重复注册会抛错
+  ctx.effect?.(() => () => {
+    for (const dispose of disposers.splice(0)) {
+      try {
+        dispose()
+      } catch {
+        /* 已经被宿主摘掉 */
+      }
+    }
+  }, 'xiaoyuzhou-hot: unregister routes')
+
+  log.info?.('xiaoyuzhou-hot: routes /x-hot/list and /x-hot/health registered')
+}

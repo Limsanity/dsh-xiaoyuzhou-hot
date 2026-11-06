@@ -1,0 +1,62 @@
+{
+  "name": "@lim324/dsh-xiaoyuzhou-hot",
+  "version": "0.1.0",
+  "description": "小宇宙热榜:侧边栏入口 + 主面板,展示热门/新锐播客与热门单集(数据来自中文播客榜 xyzrank 的公开 JSON,由宿主代理并缓存)",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "meta": {
+      "title": "小宇宙热榜",
+      "description": "侧边栏点开即看小宇宙热门播客 / 新锐播客 / 热门单集"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "jsdom": "^31.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Limsanity/dsh-xiaoyuzhou-hot.git"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "xiaoyuzhou",
+    "podcast",
+    "ranking"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
+}

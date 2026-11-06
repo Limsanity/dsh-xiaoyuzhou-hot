@@ -1,0 +1,29 @@
+# 本地安装,不进仓库
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+*.tgz
+npm-debug.log*
+pnpm-debug.log*
+
+# 测试生成的静态预览(用 node test-client.mjs 随时重造)
+preview.html
+preview-episodes.html
+
+# Secrets
+.env
+.env.*
+!.env.example
+.credentials.yaml
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# 本地 DSH / tooling
+.dsh/
