@@ -2,7 +2,7 @@
 
 DSH Web GUI 插件:左侧边栏多一个榜单入口,点开在主列显示**小宇宙热门播客 / 新锐播客 / 热门单集**。
 
-- 播客行:点一下跳到小宇宙播客页。
+- 播客行:**原地切到该播客的频道,列出分集**(不再跳浏览器)。
 - 单集行:**点一下新开一个 DSH 会话,并把"总结这一集"的任务预填进输入框**,回车即开跑;行尾的 ↗ 才是在小宇宙打开。
 
 ![热门播客](docs/screenshot-podcasts.png)
@@ -13,6 +13,26 @@ DSH Web GUI 插件:左侧边栏多一个榜单入口,点开在主列显示**小�
 
 真正的目的是把"看到一集 → 总结它"这段路缩短到一次点击:不用复制标题、不用贴链接、不用重述流程。
 
+## 频道页从哪拿分集
+
+小宇宙网页只渲染最新 15 集,没有分页接口;App API 要登录态。所以分集走播客自己的 RSS:
+
+```
+小宇宙播客 id / Apple id   →  iTunes lookup 拿 feedUrl   →  RSS 全量分集
+   (来自 xyzrank 的 links.apple)      ↓ 拿不到 RSS
+                                小宇宙播客页 SSR(最新 15 集)+ 提示"完整历史去小宇宙"
+```
+
+小宇宙托管的节目,feed 就在 `feed.xyzfm.space`(如《岩中花述》87 集、《知行小酒馆》270 集),条数与该播客的单集总数一致,标题/日期/时长/音频直链都能拿到。
+
+解析用正则完成,不引第三方 XML 库:支持 CDATA、`&amp;` 等实体、`itunes:duration` 的 `01:51:36` / `6660` 两种写法。
+
+### 路由
+
+| 路由 | 说明 |
+|---|---|
+| `GET /x-hot/channel?id=<24位小宇宙播客id>&apple=<Apple播客id>&limit=1..300` | 频道分集;`source=rss` 或 `ssr` |
+
 ## 点击单集之后发生什么
 
 ```js
@@ -21,7 +41,8 @@ uiWorkspace.startSession(undefined, { prompt, clearPreviousDraft: true })
 
 - `sessionScope` 走 `ctx.inject(['uiWorkspace'])` 拿,晚于 `slots` 就绪也不会卡住面板注册;
 - 没有 `uiWorkspace`(非 Web 组合、或服务未就绪)时退化成打开小宇宙网页,不会静默失败;
-- 预填的 prompt 带标题、播客名、分类、单集链接,并写明流程(读 shownotes → mlx-whisper 转写 → 结论/要点/金句/判断),所以新会话不需要再问一遍"用什么工具";
+- 预填的 prompt 带标题、播客名、发布日期、时长、单集页链接;**从频道页点进来的还带音频直链**,流程会相应改成"页面打不开就直接下音频转写";
+- prompt 里写明流程(读 shownotes → mlx-whisper 转写 → 结论/要点/金句/判断),新会话不需要再问一遍"用什么工具";
 - `clearPreviousDraft: true` 是刻意的:保证这次的任务真的落进输入框,代价是会覆盖被复用空白会话里的旧草稿。
 
 ## 数据与实现
@@ -41,7 +62,7 @@ uiWorkspace.startSession(undefined, { prompt, clearPreviousDraft: true })
 
 | 路由 | 说明 |
 |---|---|
-| `GET /x-hot/list?kind=podcasts\|new\|episodes\|new-episodes&limit=1..100&offset=0` | 榜单数据(归一化后的 JSON) |
+| `GET /x-hot/list?kind=podcasts\|new\|episodes\|new-episodes&limit=1..100&offset=0` | 榜单数据(归一化后的 JSON,播客条目带 `appleId`) |
 | `GET /x-hot/health` | 存活探针 |
 
 返回:
@@ -94,5 +115,6 @@ node test-client.mjs    # jsdom 里真实 mount:渲染 100 行 + 断言"点单�
 
 - 榜单口径来自第三方 xyzrank(约 8k 档节目),不是小宇宙官方榜;更新有滞后。
 - 上游没有分页游标,`limit` 最大 100;面板只展示前 100 名。
-- 只读:不做订阅、不做播放;单集点击只是开一场新会话并预填任务,真正发不发由你决定。
+- 只读:不做订阅、不做播放;点单集只是开一场新会话并预填任务,真正发不发由你决定。
+- 频道页依赖 RSS:播客没有 Apple 链接(或 RSS 抓不到)时退化到最新 15 集,这一点会在页脚标出来。
 - 封面图来自上游(部分是 Apple 的 CDN),离线时显示占位块。

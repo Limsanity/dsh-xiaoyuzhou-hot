@@ -5,6 +5,8 @@
  * 所以浅色/深色主题自动跟随。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChannelView } from './Channel.jsx'
+import { formatClock, formatCount, formatRate } from './format.js'
 
 const TABS = [
   { key: 'podcasts', label: '热门播客' },
@@ -13,27 +15,6 @@ const TABS = [
 ]
 
 const PAGE_LIMIT = 100
-
-/** 1.9 亿 → 1.9亿;68234 → 6.8万 */
-function formatCount(n) {
-  if (!Number.isFinite(n) || n <= 0) return '—'
-  if (n >= 100000000) return `${(n / 100000000).toFixed(1).replace(/\.0$/, '')}亿`
-  if (n >= 10000) return `${(n / 10000).toFixed(1).replace(/\.0$/, '')}万`
-  return String(Math.round(n))
-}
-
-function formatRate(rate) {
-  // 上游偶发 >100% 的脏数据(统计口径不同),宁可不显示也不误导
-  if (!Number.isFinite(rate) || rate <= 0 || rate > 1) return '—'
-  return `${(rate * 100).toFixed(1)}%`
-}
-
-function formatTime(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  if (Number.isNaN(d.getTime())) return ''
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
 
 async function fetchList(kind, signal) {
   const res = await fetch(`/x-hot/list?kind=${encodeURIComponent(kind)}&limit=${PAGE_LIMIT}`, { signal })
@@ -62,7 +43,9 @@ export function HotPanel({ summarize, openExternal }) {
   const [error, setError] = useState('')
   const [fetchedAt, setFetchedAt] = useState(0)
   const [query, setQuery] = useState('')
+  const [channel, setChannel] = useState(null)
   const ctrl = useRef(null)
+  const channelCtrl = useRef(null)
 
   const load = useCallback(async (nextKind) => {
     ctrl.current?.abort()
@@ -105,6 +88,57 @@ export function HotPanel({ summarize, openExternal }) {
     )
   }, [items, query])
 
+  const closeChannel = useCallback(() => {
+    channelCtrl.current?.abort()
+    setChannel(null)
+    try {
+      window.sessionStorage?.removeItem('xzr.channel')
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  const openChannel = useCallback(async (podcast) => {
+    const id = /\/podcast\/([0-9a-f]{24})/i.exec(podcast?.url ?? '')?.[1] ?? ''
+    setChannel((cur) => ({
+      podcast,
+      data: cur && cur.podcast?.url === podcast?.url ? cur.data : null,
+      loading: true,
+      error: '',
+    }))
+    channelCtrl.current?.abort()
+    const controller = new AbortController()
+    channelCtrl.current = controller
+    try {
+      window.sessionStorage?.setItem('xzr.channel', JSON.stringify(podcast))
+    } catch {
+      /* ignore */
+    }
+    try {
+      const qs = new URLSearchParams({ limit: '300' })
+      if (id) qs.set('id', id)
+      if (podcast?.appleId) qs.set('apple', podcast.appleId)
+      const res = await fetch(`/x-hot/channel?${qs.toString()}`, { signal: controller.signal })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      if (controller.signal.aborted) return
+      setChannel((cur) => (cur ? { ...cur, loading: false, data, error: '' } : cur))
+    } catch (err) {
+      if (controller.signal.aborted) return
+      setChannel((cur) => (cur ? { ...cur, loading: false, error: String(err?.message ?? err) } : cur))
+    }
+  }, [])
+
+  // 从会话切回来时,回到上次看的频道(只在本标签页会话内记忆)
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage?.getItem('xzr.channel')
+      if (saved) openChannel(JSON.parse(saved))
+    } catch {
+      /* 解析失败就当没存过 */
+    }
+  }, [openChannel])
+
   const open = useCallback((url) => {
     if (!url) return
     if (typeof openExternal === 'function') return openExternal(url)
@@ -120,6 +154,24 @@ export function HotPanel({ summarize, openExternal }) {
   }, [summarize])
 
   const isEpisode = kind === 'episodes'
+
+  if (channel) {
+    return (
+      <>
+        <style>{STYLES}</style>
+        <ChannelView
+          podcast={channel.podcast}
+          data={channel.data}
+          loading={channel.loading}
+          error={channel.error}
+          onBack={closeChannel}
+          onRetry={() => openChannel(channel.podcast)}
+          summarize={summarizeEpisode}
+          openExternal={open}
+        />
+      </>
+    )
+  }
 
   return (
     <div className="xzr-root">
@@ -207,8 +259,8 @@ export function HotPanel({ summarize, openExternal }) {
                 <button
                   type="button"
                   className="xzr-row"
-                  onClick={() => (isEpisode ? summarizeEpisode(item) : open(item.url))}
-                  title={isEpisode ? `新开 DSH 会话总结：${item.title}` : item.url || '暂无链接'}
+                  onClick={() => (isEpisode ? summarizeEpisode(item) : openChannel(item))}
+                  title={isEpisode ? `新开 DSH 会话总结:${item.title}` : `看 ${item.title} 的分集列表`}
                 >
                   <span className={`xzr-rank${item.rank <= 3 ? ` is-top is-${item.rank}` : ''}`}>{item.rank}</span>
                   {item.logo ? <img className="xzr-logo" src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="xzr-logo xzr-logo-empty" />}
@@ -258,7 +310,7 @@ export function HotPanel({ summarize, openExternal }) {
           {total > items.length ? ` · 共 ${total} 档上榜` : ''}
           {isEpisode ? ' · 点单集新开会话总结' : ''}
         </span>
-        <span>{fetchedAt ? `更新于 ${formatTime(fetchedAt)}` : '—'}</span>
+        <span>{fetchedAt ? `更新于 ${formatClock(fetchedAt)}` : '—'}</span>
       </footer>
     </div>
   )
@@ -297,6 +349,27 @@ export function HotIcon({ size = 18, active = false }) {
 const STYLES = `
 .xzr-root{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);
   color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
+.xzr-ch-head{flex:none;display:flex;align-items:center;gap:10px;
+  padding:12px max(24px,calc((100% - 1040px)/2)) 11px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.xzr-back{display:inline-flex;align-items:center;gap:3px;height:28px;padding:0 8px 0 4px;border:0;
+  border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);
+  font-size:12px;cursor:pointer;flex:none;transition:background .15s,color .15s}
+.xzr-back:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.xzr-ch-id{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.xzr-ch-logo{flex:none;width:40px;height:40px;border-radius:8px;object-fit:cover;background:var(--dsw-alias-bg-layer-1)}
+.xzr-ch-meta{min-width:0}
+.xzr-ch-title{margin:0;font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xzr-ch-sub{margin:2px 0 0;font-size:11.5px;color:var(--dsw-alias-label-tertiary);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xzr-ch-sub em{font-style:normal;margin-left:4px;color:var(--dsw-alias-label-caption)}
+.xzr-ch-actions{display:flex;align-items:center;gap:8px;flex:none}
+.xzr-ch-search{min-width:170px}
+.xzr-stat-cta b{color:var(--dsw-alias-brand-primary);font-size:12px}
+.xzr-stat-cta{opacity:0;transition:opacity .15s}
+.xzr-item:hover .xzr-stat-cta,.xzr-row:focus-visible .xzr-stat-cta{opacity:1}
+.xzr-state-actions{display:flex;gap:8px;justify-content:center}
+@media (max-width:860px){.xzr-ch-actions .xzr-ch-search{display:none}.xzr-ch-sub em:nth-of-type(2){display:none}}
 .xzr-header{flex:none;padding:18px max(24px,calc((100% - 1040px)/2)) 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .xzr-headrow{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
 .xzr-brand{display:flex;flex-direction:column;gap:2px;min-width:0}
