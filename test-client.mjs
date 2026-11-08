@@ -9,11 +9,16 @@
  *  6. 导出 preview.html / preview-episodes.html / preview-channel.html
  */
 import { createRequire } from 'node:module'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
 import React from 'react'
 
 const require = createRequire(import.meta.url)
+
+// 测试绝不能碰真实记录:宿主按 DSH_HOME 落盘,这里换到临时目录
+process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'xzr-client-test-'))
 
 // ---- 0. jsdom 必须先建:bundle 加载时就把 window 捕获了 ----------------------
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {

@@ -1,4 +1,10 @@
-import { apply } from './lib/index.js'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// 测试绝不能碰真实记录:换一个临时 DSH_HOME,宿主按它落盘
+process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'xzr-host-test-'))
+const { apply } = await import('./lib/index.js')
 
 const routes = []
 const ctx = {

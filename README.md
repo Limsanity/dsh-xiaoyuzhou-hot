@@ -24,7 +24,9 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 ```
 
 - 键优先用单集 id(`eid`),没有就退化到链接;
-- 写入用 tmp + rename,不会写坏;`MAX_LIBRARY` 2000 条封顶,超出丢最旧;
+- 写入用 tmp + rename,不会写坏;每次落盘前把上一版复制成 `library.json.bak`,主文件丢失/损坏时自动从备份读回;
+- 写入有 150ms 合并窗口,插件卸载/热重载时立即落盘(不等窗口);`MAX_LIBRARY` 2000 条封顶,超出丢最旧;
+- **测试隔离**:`test-host.mjs` / `test-client.mjs` 会把 `DSH_HOME` 指到临时目录,绝不碰真实记录;
 - 面板里:**行首 ✓ + 「已总结」小标签**、频道页头部「已总结 N」、`我的总结` tab(可按关键词过滤,点 × 取消标记);
 - 会话侧:预填 prompt 的第一行就是 `总结《播客》单集标题`,而 DSH 的默认标题 provider 从首个 prompt 生成标题,所以左侧会话列表里能直接认出是哪一集。
 

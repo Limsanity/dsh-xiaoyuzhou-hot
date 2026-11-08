@@ -12,7 +12,7 @@
  *   GET /x-hot/channel?id=<小宇宙播客 id>&apple=<Apple Podcasts id>
  *   GET /x-hot/health
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -211,44 +211,58 @@ function readJsonBody(req, limitBytes = 64 * 1024) {
 
 /**
  * 「我总结过哪些单集」的本地记录:一个 JSON 文件,key 是单集 id(或 url)。
- * 只存在本机,不联网;写盘用 tmp+rename,避免半截文件。
+ * 只存在本机,不联网;写盘用 tmp+rename,并保留一份 .bak,
+ * 主文件被误删/写坏时还能从备份读回来。
  */
 class Library {
   constructor(path, log) {
     this.path = path
+    this.backupPath = `${path}.bak`
     this.log = log
     this.items = new Map()
     this.loaded = false
     this.loading = undefined
-    this.saveTimer = undefined
-    this.saving = Promise.resolve()
+    this.timer = undefined
+    this.pending = undefined
   }
 
   async load() {
     if (this.loaded) return this.items
     if (this.loading === undefined) {
-      this.loading = readFile(this.path, 'utf8')
-        .then((raw) => {
-          const parsed = JSON.parse(raw)
-          const list = Array.isArray(parsed?.items) ? parsed.items : []
-          for (const item of list) {
-            if (item && typeof item.key === 'string') this.items.set(item.key, item)
+      this.loading = (async () => {
+        const found = await this.readFirst([this.path, this.backupPath])
+        if (found) {
+          try {
+            const parsed = JSON.parse(found.raw)
+            const list = Array.isArray(parsed?.items) ? parsed.items : []
+            for (const item of list) {
+              if (item && typeof item.key === 'string') this.items.set(item.key, item)
+            }
+            if (found.path === this.backupPath) {
+              this.log?.warn?.('xiaoyuzhou-hot: 主记录文件不可用,已从 library.json.bak 恢复')
+            }
+          } catch (error) {
+            this.log?.warn?.(`xiaoyuzhou-hot: library 解析失败,按空库继续 (${error?.message ?? error})`)
           }
-          this.loaded = true
-          return this.items
-        })
-        .catch((error) => {
-          if (error?.code !== 'ENOENT') {
-            this.log?.warn?.(`xiaoyuzhou-hot: library 读取失败,按空库继续 (${error?.message ?? error})`)
-          }
-          this.loaded = true
-          return this.items
-        })
-        .finally(() => {
-          this.loading = undefined
-        })
+        }
+        this.loaded = true
+        return this.items
+      })().finally(() => {
+        this.loading = undefined
+      })
     }
     return this.loading
+  }
+
+  async readFirst(paths) {
+    for (const path of paths) {
+      try {
+        return { path, raw: await readFile(path, 'utf8') }
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+    }
+    return undefined
   }
 
   async list() {
@@ -289,27 +303,48 @@ class Library {
     return removed
   }
 
-  /** 合并短时间内的多次写入,再落盘 */
+  /**
+   * 合并短时间内的多次写入:共用一个 150ms 窗口,窗口内所有调用等同一个 promise,
+   * 不会出现"后一次 clearTimeout 把前一次的 promise 永远挂住"的情况。
+   */
   flush() {
-    clearTimeout(this.saveTimer)
-    this.saving = this.saving.then(
-      () =>
-        new Promise((resolve) => {
-          this.saveTimer = setTimeout(async () => {
-            try {
-              await mkdir(dirname(this.path), { recursive: true })
-              const tmp = `${this.path}.tmp`
-              const payload = JSON.stringify({ version: 1, items: [...this.items.values()] }, null, 2)
-              await writeFile(tmp, payload, 'utf8')
-              await rename(tmp, this.path)
-            } catch (error) {
-              this.log?.warn?.(`xiaoyuzhou-hot: library 写入失败 (${error?.message ?? error})`)
-            }
-            resolve()
-          }, 150)
-        }),
-    )
-    return this.saving
+    if (this.pending) return this.pending
+    this.pending = (async () => {
+      await new Promise((resolve) => {
+        this.timer = setTimeout(resolve, 150)
+      })
+      this.timer = undefined
+      this.pending = undefined
+      await this.write()
+    })()
+    return this.pending
+  }
+
+  /** 卸载/退出前立即落盘,不等窗口 */
+  async flushNow() {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = undefined
+    }
+    this.pending = undefined
+    await this.write()
+  }
+
+  async write() {
+    try {
+      await mkdir(dirname(this.path), { recursive: true })
+      const payload = JSON.stringify({ version: 1, items: [...this.items.values()] }, null, 2)
+      const tmp = `${this.path}.tmp`
+      await writeFile(tmp, payload, 'utf8')
+      try {
+        await copyFile(this.path, this.backupPath)
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+      await rename(tmp, this.path)
+    } catch (error) {
+      this.log?.warn?.(`xiaoyuzhou-hot: library 写入失败 (${error?.message ?? error})`)
+    }
   }
 }
 
@@ -487,6 +522,11 @@ export function apply(ctx, config = {}) {
       handler: (req, res) => sendJson(res, 200, { ok: true, plugin: 'xiaoyuzhou-hot', upstream: UPSTREAM }),
     }),
   )
+
+  // 退出/热重载前把待写记录落盘(debounce 窗口内的改动不丢)
+  ctx.effect?.(() => () => {
+    library.flushNow().catch(() => {})
+  }, 'xiaoyuzhou-hot: flush library on dispose')
 
   // 热重载时先摘掉旧路由,再挂新的;否则重复注册会抛错
   ctx.effect?.(() => () => {
