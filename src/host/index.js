@@ -12,6 +12,10 @@
  *   GET /x-hot/channel?id=<小宇宙播客 id>&apple=<Apple Podcasts id>
  *   GET /x-hot/health
  */
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+
 export const name = 'xiaoyuzhou-hot'
 
 /** 只依赖 web server,不碰 agent / tools,尽量轻。 */
@@ -31,6 +35,9 @@ const FEED_TTL_MS = 10 * 60 * 1000
 const LOOKUP_TTL_MS = 24 * 60 * 60 * 1000
 const TIMEOUT_MS = 20_000
 const MAX_EPISODES = 300
+const MAX_LIBRARY = 2000
+const LIBRARY_DIR = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'xiaoyuzhou-hot')
+const LIBRARY_FILE = join(LIBRARY_DIR, 'library.json')
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
 
@@ -176,6 +183,129 @@ function parseSsrEpisodes(html, limit) {
   }
 }
 
+// ------------------------------------------------------------- 已读记录库 ---
+
+function readJsonBody(req, limitBytes = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limitBytes) {
+        reject(new Error('body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      try {
+        resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {})
+      } catch (error) {
+        reject(new Error(`invalid JSON: ${error.message}`))
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+/**
+ * 「我总结过哪些单集」的本地记录:一个 JSON 文件,key 是单集 id(或 url)。
+ * 只存在本机,不联网;写盘用 tmp+rename,避免半截文件。
+ */
+class Library {
+  constructor(path, log) {
+    this.path = path
+    this.log = log
+    this.items = new Map()
+    this.loaded = false
+    this.loading = undefined
+    this.saveTimer = undefined
+    this.saving = Promise.resolve()
+  }
+
+  async load() {
+    if (this.loaded) return this.items
+    if (this.loading === undefined) {
+      this.loading = readFile(this.path, 'utf8')
+        .then((raw) => {
+          const parsed = JSON.parse(raw)
+          const list = Array.isArray(parsed?.items) ? parsed.items : []
+          for (const item of list) {
+            if (item && typeof item.key === 'string') this.items.set(item.key, item)
+          }
+          this.loaded = true
+          return this.items
+        })
+        .catch((error) => {
+          if (error?.code !== 'ENOENT') {
+            this.log?.warn?.(`xiaoyuzhou-hot: library 读取失败,按空库继续 (${error?.message ?? error})`)
+          }
+          this.loaded = true
+          return this.items
+        })
+        .finally(() => {
+          this.loading = undefined
+        })
+    }
+    return this.loading
+  }
+
+  async list() {
+    await this.load()
+    return [...this.items.values()].sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+  }
+
+  async mark(input) {
+    await this.load()
+    const key = String(input?.key ?? '').slice(0, 400)
+    if (!key) throw new Error('key 不能为空')
+    const item = {
+      key,
+      title: String(input?.title ?? '').slice(0, 300),
+      podcast: String(input?.podcast ?? '').slice(0, 200),
+      url: String(input?.url ?? '').slice(0, 600),
+      podcastUrl: String(input?.podcastUrl ?? '').slice(0, 600),
+      at: Number.isFinite(input?.at) ? input.at : Date.now(),
+    }
+    this.items.delete(key)
+    this.items.set(key, item)
+    while (this.items.size > MAX_LIBRARY) this.items.delete(this.items.keys().next().value)
+    await this.flush()
+    return item
+  }
+
+  async unmark(key) {
+    await this.load()
+    const removed = this.items.delete(String(key ?? ''))
+    if (removed) await this.flush()
+    return removed
+  }
+
+  /** 合并短时间内的多次写入,再落盘 */
+  flush() {
+    clearTimeout(this.saveTimer)
+    this.saving = this.saving.then(
+      () =>
+        new Promise((resolve) => {
+          this.saveTimer = setTimeout(async () => {
+            try {
+              await mkdir(dirname(this.path), { recursive: true })
+              const tmp = `${this.path}.tmp`
+              const payload = JSON.stringify({ version: 1, items: [...this.items.values()] }, null, 2)
+              await writeFile(tmp, payload, 'utf8')
+              await rename(tmp, this.path)
+            } catch (error) {
+              this.log?.warn?.(`xiaoyuzhou-hot: library 写入失败 (${error?.message ?? error})`)
+            }
+            resolve()
+          }, 150)
+        }),
+    )
+    return this.saving
+  }
+}
+
 // ------------------------------------------------------------------- 插件 ---
 
 export function apply(ctx, config = {}) {
@@ -184,6 +314,7 @@ export function apply(ctx, config = {}) {
   /** key -> Promise,避免并发穿透 */
   const inflight = new Map()
   const log = ctx.logger ?? console
+  const library = new Library(LIBRARY_FILE, log)
 
   function cached(key, ttl, producer) {
     const hit = cache.get(key)
@@ -315,6 +446,36 @@ export function apply(ctx, config = {}) {
   disposers.push(
     ctx.webServer.register({
       kind: 'exact',
+      path: '/x-hot/library',
+      handler: async (req, res) => {
+        const url = new URL(req.url ?? '/x-hot/library', 'http://localhost')
+        try {
+          if (req.method === 'GET') {
+            const items = await library.list()
+            return sendJson(res, 200, { ok: true, items, count: items.length })
+          }
+          if (req.method === 'POST') {
+            const body = await readJsonBody(req)
+            const item = await library.mark(body)
+            return sendJson(res, 200, { ok: true, item, count: (await library.list()).length })
+          }
+          if (req.method === 'DELETE') {
+            const key = url.searchParams.get('key') ?? ''
+            const removed = await library.unmark(key)
+            return sendJson(res, 200, { ok: true, removed, count: (await library.list()).length })
+          }
+          return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: library ${error?.message ?? error}`)
+          return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
       path: '/x-hot/health',
       handler: (req, res) => sendJson(res, 200, { ok: true, plugin: 'xiaoyuzhou-hot', upstream: UPSTREAM }),
     }),
@@ -331,5 +492,5 @@ export function apply(ctx, config = {}) {
     }
   }, 'xiaoyuzhou-hot: unregister routes')
 
-  log.info?.('xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/health registered')
+  log.info?.('xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/library, /x-hot/health registered')
 }

@@ -8,8 +8,10 @@
 import { formatDay, formatDuration } from './format.js'
 
 export function buildSummaryPrompt(episode) {
-  const lines = ['帮我整理这集播客，输出可以直接复用的笔记。', '']
-  lines.push(`标题：${episode?.title ?? ''}`)
+  // 第一行会决定会话标题(默认标题 provider 从首个 prompt 生成),
+  // 所以写成"总结《播客》单集标题",侧栏里能一眼认出来。
+  const podcastName = episode?.author ? `《${episode.author}》` : ''
+  const lines = [`总结${podcastName}${episode?.title ?? ''}`, '']
   if (episode?.author) lines.push(`播客：${episode.author}`)
   const day = formatDay(episode?.pubDate)
   if (day) lines.push(`发布：${day}`)

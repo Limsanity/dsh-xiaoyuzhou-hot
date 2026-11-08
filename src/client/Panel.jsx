@@ -6,13 +6,19 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChannelView } from './Channel.jsx'
-import { formatClock, formatCount, formatRate } from './format.js'
+import { formatClock, formatCount, formatRate, formatWhen } from './format.js'
 
 const TABS = [
   { key: 'podcasts', label: '热门播客' },
   { key: 'new', label: '新锐播客' },
   { key: 'episodes', label: '热门单集' },
+  { key: 'library', label: '我的总结' },
 ]
+
+/** 单集在本地记录里的键:优先用 id,退化成链接 */
+function keyOf(episode) {
+  return String(episode?.id || episode?.url || episode?.title || '')
+}
 
 const PAGE_LIMIT = 100
 
@@ -44,10 +50,31 @@ export function HotPanel({ summarize, openExternal }) {
   const [fetchedAt, setFetchedAt] = useState(0)
   const [query, setQuery] = useState('')
   const [channel, setChannel] = useState(null)
+  const [library, setLibrary] = useState([])
   const ctrl = useRef(null)
   const channelCtrl = useRef(null)
 
+  const libraryIndex = useMemo(() => new Map(library.map((item) => [item.key, item])), [library])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/x-hot/library')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data?.ok) setLibrary(data.items ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const load = useCallback(async (nextKind) => {
+    if (nextKind === 'library') {
+      setLoading(false)
+      setError('')
+      return
+    }
     ctrl.current?.abort()
     const controller = new AbortController()
     ctrl.current = controller
@@ -150,13 +177,46 @@ export function HotPanel({ summarize, openExternal }) {
     window.open(url, '_blank', 'noopener,noreferrer')
   }, [openExternal])
 
-  const summarizeEpisode = useCallback((item) => {
+  const markSummarized = useCallback((item, podcast) => {
+    const key = keyOf(item)
+    if (!key) return
+    const entry = {
+      key,
+      title: item?.title ?? '',
+      podcast: podcast?.title ?? item?.author ?? '',
+      url: item?.url ?? '',
+      podcastUrl: podcast?.url ?? '',
+      at: Date.now(),
+    }
+    // 先本地生效,UI 不用等网络
+    setLibrary((prev) => [entry, ...prev.filter((row) => row.key !== key)])
+    fetch('/x-hot/library', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(entry),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.ok && data.item) {
+          setLibrary((prev) => [data.item, ...prev.filter((row) => row.key !== data.item.key)])
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const removeSummarized = useCallback((key) => {
+    setLibrary((prev) => prev.filter((row) => row.key !== key))
+    fetch(`/x-hot/library?key=${encodeURIComponent(key)}`, { method: 'DELETE' }).catch(() => {})
+  }, [])
+
+  const summarizeEpisode = useCallback((item, podcast) => {
     if (typeof summarize !== 'function') {
       window.open(item.url, '_blank', 'noopener,noreferrer')
       return
     }
     summarize(item)
-  }, [summarize])
+    markSummarized(item, podcast)
+  }, [summarize, markSummarized])
 
   const isEpisode = kind === 'episodes'
 
@@ -173,6 +233,7 @@ export function HotPanel({ summarize, openExternal }) {
           onRetry={() => openChannel(channel.podcast)}
           summarize={summarizeEpisode}
           openExternal={open}
+          isDone={(ep) => libraryIndex.has(keyOf(ep))}
         />
       </>
     )
@@ -227,7 +288,7 @@ export function HotPanel({ summarize, openExternal }) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={isEpisode ? '搜单集 / 播客' : '搜播客 / 作者 / 分类'}
+              placeholder={kind === 'library' ? '搜我总结过的单集' : isEpisode ? '搜单集 / 播客' : '搜播客 / 作者 / 分类'}
               aria-label="筛选榜单"
             />
             {query ? (
@@ -240,9 +301,13 @@ export function HotPanel({ summarize, openExternal }) {
       </header>
 
       <div className="xzr-body">
-        {loading && items.length === 0 ? <Skeleton /> : null}
+        {kind === 'library' ? (
+          <LibraryList items={library} query={query} openExternal={open} onRemove={removeSummarized} />
+        ) : null}
 
-        {!loading && error ? (
+        {kind !== 'library' && loading && items.length === 0 ? <Skeleton /> : null}
+
+        {kind !== 'library' && !loading && error ? (
           <div className="xzr-state xzr-error" role="alert">
             <strong>没拉到榜单</strong>
             <p>{error}</p>
@@ -250,14 +315,14 @@ export function HotPanel({ summarize, openExternal }) {
           </div>
         ) : null}
 
-        {!loading && !error && filtered.length === 0 ? (
+        {kind !== 'library' && !loading && !error && filtered.length === 0 ? (
           <div className="xzr-state">
             <strong>{query ? '没有匹配的条目' : '榜单是空的'}</strong>
             <p>{query ? '换个关键词试试' : '上游暂时没有返回数据'}</p>
           </div>
         ) : null}
 
-        {filtered.length > 0 ? (
+        {kind !== 'library' && filtered.length > 0 ? (
           <ol className="xzr-list">
             {filtered.map((item) => (
               <li key={`${item.rank}-${item.title}`} className="xzr-item">
@@ -272,6 +337,7 @@ export function HotPanel({ summarize, openExternal }) {
                   <span className="xzr-main">
                     <span className="xzr-title">{item.title}</span>
                     <span className="xzr-sub">
+                      {libraryIndex.has(keyOf(item)) ? <span className="xzr-done">✓ 已总结</span> : null}
                       {item.author || '—'}
                       {item.genre ? <em>· {item.genre}</em> : null}
                       {isEpisode ? null : <em>· {item.episodes} 集</em>}
@@ -311,13 +377,78 @@ export function HotPanel({ summarize, openExternal }) {
 
       <footer className="xzr-foot">
         <span>
-          {query ? `${filtered.length} / ${items.length} 条` : `前 ${items.length} 名`}
-          {total > items.length ? ` · 共 ${total} 档上榜` : ''}
-          {isEpisode ? ' · 点单集新开会话总结' : ''}
+          {kind === 'library'
+            ? `${library.length} 条记录 · 存在本机`
+            : query
+              ? `${filtered.length} / ${items.length} 条`
+              : `前 ${items.length} 名`}
+          {kind !== 'library' && total > items.length ? ` · 共 ${total} 档上榜` : ''}
+          {kind !== 'library' && isEpisode ? ' · 点单集新开会话总结' : ''}
         </span>
         <span>{fetchedAt ? `更新于 ${formatClock(fetchedAt)}` : '—'}</span>
       </footer>
     </div>
+  )
+}
+
+function LibraryList({ items, query, openExternal, onRemove }) {
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return items
+    return items.filter(
+      (it) => it.title?.toLowerCase().includes(q) || it.podcast?.toLowerCase().includes(q),
+    )
+  }, [items, query])
+
+  if (items.length === 0) {
+    return (
+      <div className="xzr-state">
+        <strong>还没有总结记录</strong>
+        <p>在榜单或频道里点任意一集,这里就会记下来</p>
+      </div>
+    )
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <div className="xzr-state">
+        <strong>没有匹配的记录</strong>
+        <p>换个关键词试试</p>
+      </div>
+    )
+  }
+
+  return (
+    <ol className="xzr-list">
+      {filtered.map((item) => (
+        <li key={item.key} className="xzr-item">
+          <button
+            type="button"
+            className="xzr-row"
+            onClick={() => openExternal(item.url)}
+            title={item.url || '暂无链接'}
+          >
+            <span className="xzr-rank xzr-rank-done">✓</span>
+            <span className="xzr-main">
+              <span className="xzr-title">{item.title}</span>
+              <span className="xzr-sub">
+                {item.podcast || '—'}
+                <em>· {formatWhen(item.at)}</em>
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="xzr-ext xzr-ext-always"
+            onClick={() => onRemove(item.key)}
+            title="取消标记(下次还能重新总结)"
+            aria-label="取消标记"
+          >
+            ×
+          </button>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -368,9 +499,14 @@ const STYLES = `
 .xzr-ch-sub{margin:2px 0 0;font-size:11.5px;color:var(--dsw-alias-label-tertiary);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .xzr-ch-sub em{font-style:normal;margin-left:4px;color:var(--dsw-alias-label-caption)}
+.xzr-ch-done{color:var(--dsw-alias-state-business-primary)!important}
 .xzr-ch-actions{display:flex;align-items:center;gap:8px;flex:none}
 .xzr-ch-search{min-width:170px}
 .xzr-stat-cta b{color:var(--dsw-alias-brand-primary);font-size:12px}
+.xzr-done{display:inline-block;margin-right:6px;padding:0 5px;border-radius:4px;font-size:10.5px;
+  color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
+.xzr-rank-done{color:var(--dsw-alias-state-business-primary);font-weight:700}
+.xzr-ext.xzr-ext-always{opacity:.55}
 .xzr-stat-cta{opacity:0;transition:opacity .15s}
 .xzr-item:hover .xzr-stat-cta,.xzr-row:focus-visible .xzr-stat-cta{opacity:1}
 .xzr-state-actions{display:flex;gap:8px;justify-content:center}

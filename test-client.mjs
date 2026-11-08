@@ -65,13 +65,25 @@ Object.defineProperty(window, 'open', {
   writable: true,
   configurable: true,
 })
+const libraryPosts = []
 globalThis.fetch = async (url, init = {}) => {
   const raw = String(url)
   if (/^https?:\/\//.test(raw)) return realFetch(raw, init)
   const route = routes.find((r) => raw.startsWith(r.path))
   if (!route) return new Response(JSON.stringify({ ok: false, error: 'no route ' + raw }), { status: 404 })
+  if ((init.method ?? 'GET') === 'POST') libraryPosts.push(JSON.parse(init.body ?? '{}'))
+  const req = {
+    method: init.method ?? 'GET',
+    url: raw,
+    on(ev, fn) {
+      if (ev === 'data' && init.body) queueMicrotask(() => fn(Buffer.from(init.body)))
+      if (ev === 'end') queueMicrotask(fn)
+      return req
+    },
+    destroy() {},
+  }
   const body = await new Promise((resolve) => {
-    route.handler({ method: init.method ?? 'GET', url: raw }, { writeHead() {}, end(b) { resolve(b) } })
+    route.handler(req, { writeHead() {}, end(b) { resolve(b) } })
   })
   return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })
 }
@@ -111,6 +123,12 @@ const chPrompt = chCall?.options?.prompt ?? ''
 console.log('channel episode -> sessionCalls:', sessionCalls.length, '| promptLen:', chPrompt.length)
 if (!chPrompt.includes('音频直链：')) throw new Error('prompt missing audio url')
 console.log('--- channel prompt head ---\n' + chPrompt.split('\n').slice(0, 7).join('\n'))
+console.log('library writes:', libraryPosts.length, '|', JSON.stringify(libraryPosts.at(-1)?.title))
+if (libraryPosts.length === 0) throw new Error('clicking an episode should record it in the library')
+await tick(600)
+const doneChip = container.querySelector('.xzr-done')
+console.log('done chip:', doneChip?.textContent ?? '(none)')
+if (!doneChip) throw new Error('summarized episode should show the done chip')
 
 // 返回榜单
 await click(container.querySelector('.xzr-back'))
@@ -155,7 +173,8 @@ const bodyOf = () => container.innerHTML.replace(/<style>[\s\S]*?<\/style>/, '')
 writeFileSync(new URL('./preview-episodes.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 热门单集'))
 
 await click(tabs[0])
-await tick(1500)
+await tick(1800)
+console.log('after tab0 -> active:', container.querySelector('.xzr-tab.is-active')?.textContent, '| rows:', container.querySelectorAll('.xzr-row').length, '| channel:', !!container.querySelector('.xzr-ch-head'))
 writeFileSync(new URL('./preview.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 热门播客'))
 
 // 再进一次频道,给频道页留一份预览
@@ -163,4 +182,16 @@ await click(container.querySelector('.xzr-row'))
 await tick(3000)
 writeFileSync(new URL('./preview-channel.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 频道分集'))
 
-console.log('preview written: preview.html / preview-episodes.html / preview-channel.html')
+// 我的总结 tab(频道页没有 tab 栏,先返回)
+await click(container.querySelector('.xzr-back'))
+await tick(600)
+const tabsNow = container.querySelectorAll('.xzr-tab')
+await click(tabsNow[3])
+await tick(800)
+const libRows = container.querySelectorAll('.xzr-row')
+const libTitle = container.querySelector('.xzr-tab.is-active')?.textContent
+console.log('library tab:', libTitle, '| rows:', libRows.length, '| first:', libRows[0]?.querySelector('.xzr-title')?.textContent)
+if (libRows.length === 0) throw new Error('library tab should list the summary we just started')
+writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的总结'))
+
+console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html')

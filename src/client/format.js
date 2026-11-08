@@ -39,3 +39,16 @@ export function formatDuration(seconds) {
   const pad = (n) => String(n).padStart(2, '0')
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
 }
+
+
+/** 时间戳 → 刚刚 / 12 分钟前 / 昨天 / 2026/09/23 */
+export function formatWhen(ts) {
+  const t = Number(ts)
+  if (!Number.isFinite(t) || t <= 0) return ''
+  const diff = Date.now() - t
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  if (diff < 172_800_000) return '昨天'
+  return formatDay(t)
+}

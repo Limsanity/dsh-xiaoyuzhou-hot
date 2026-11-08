@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react'
 import { formatDay, formatDuration } from './format.js'
 
-export function ChannelView({ podcast, data, loading, error, onBack, onRetry, summarize, openExternal }) {
+export function ChannelView({ podcast, data, loading, error, onBack, onRetry, summarize, openExternal, isDone }) {
   const [query, setQuery] = useState('')
   const episodes = data?.episodes ?? []
 
@@ -13,6 +13,7 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
   }, [episodes, query])
 
   const limited = data?.source === 'ssr'
+  const doneCount = typeof isDone === 'function' ? episodes.filter((ep) => isDone(ep)).length : 0
 
   return (
     <div className="xzr-root">
@@ -32,6 +33,7 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
               {podcast?.author ? <span>{podcast.author}</span> : null}
               {podcast?.genre ? <em>· {podcast.genre}</em> : null}
               {data?.episodes?.length ? <em>· {episodes.length} 集{limited ? '(最新)' : ''}</em> : null}
+              {doneCount > 0 ? <em className="xzr-ch-done">· 已总结 {doneCount}</em> : null}
             </p>
           </div>
         </div>
@@ -83,13 +85,14 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
                 <button
                   type="button"
                   className="xzr-row"
-                  onClick={() => summarize({ ...ep, author: podcast?.title ?? data?.title ?? '' })}
+                  onClick={() => summarize({ ...ep, author: podcast?.title ?? data?.title ?? '' }, podcast)}
                   title={`新开 DSH 会话总结:${ep.title}`}
                 >
                   <span className="xzr-rank">{index + 1}</span>
                   <span className="xzr-main">
                     <span className="xzr-title">{ep.title}</span>
                     <span className="xzr-sub">
+                      {typeof isDone === 'function' && isDone(ep) ? <span className="xzr-done">✓ 已总结</span> : null}
                       {formatDay(ep.pubDate) || '—'}
                       {ep.duration ? <em>· {formatDuration(ep.duration)}</em> : null}
                     </span>
