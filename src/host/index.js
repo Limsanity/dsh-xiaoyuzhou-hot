@@ -25,6 +25,7 @@ export const inject = ['webServer']
 const UPSTREAM = 'https://xyzrank.com/api'
 const XIAOYUZHOU = 'https://www.xiaoyuzhoufm.com'
 const ITUNES = 'https://itunes.apple.com/lookup'
+const ITUNES_SEARCH = 'https://itunes.apple.com/search'
 const KINDS = {
   podcasts: 'podcasts',
   new: 'new-podcasts',
@@ -571,6 +572,68 @@ export function apply(ctx, config = {}) {
     })
   }
 
+  /** 读 __NEXT_DATA__,拿播客页/单集页里的 pageProps */
+  function parseNextData(html) {
+    const match = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/.exec(html)
+    if (!match) throw new Error('页面里没有 __NEXT_DATA__(结构可能变了)')
+    return JSON.parse(match[1])
+  }
+
+  function normalizeSsrPodcast(podcast) {
+    const pid = podcast?.pid ?? ''
+    return {
+      pid,
+      title: podcast?.title ?? '',
+      author: podcast?.author ?? '',
+      episodes: podcast?.episodeCount ?? 0,
+      logo: podcast?.image?.picUrl ?? podcast?.image?.smallPicUrl ?? '',
+      url: pid ? `${XIAOYUZHOU}/podcast/${pid}` : '',
+    }
+  }
+
+  /** 小宇宙链接 / 24 位 id → 播客信息 */
+  async function resolvePodcast(input) {
+    const text = String(input ?? '').trim()
+    if (!text) throw new Error('缺少链接或 id')
+    const hex = /([0-9a-f]{24})/i.exec(text)?.[1] ?? ''
+    if (/\/episode\//i.test(text)) {
+      const eid = hex || text.split('?')[0].replace(/\/+$/, '').split('/').pop()
+      if (!eid) throw new Error('认不出单集 id')
+      const data = parseNextData(await fetchText(`${XIAOYUZHOU}/episode/${eid}`))
+      const podcast = data?.props?.pageProps?.episode?.podcast
+      if (!podcast) throw new Error('单集页里没有播客信息')
+      return normalizeSsrPodcast(podcast)
+    }
+    if (!hex) throw new Error('认不出这是小宇宙的播客/单集链接(需要 24 位 id)')
+    const data = parseNextData(await fetchText(`${XIAOYUZHOU}/podcast/${hex}`))
+    const podcast = data?.props?.pageProps?.podcast
+    if (!podcast) throw new Error('播客页里没有播客信息')
+    return normalizeSsrPodcast(podcast)
+  }
+
+  /** 关键词 → iTunes 播客搜索(中国区),给榜单外的频道用 */
+  async function searchPodcasts(query, limit) {
+    return cached(`search:${query}:${limit}`, TTL_MS, async () => {
+      const url = `${ITUNES_SEARCH}?term=${encodeURIComponent(query)}&entity=podcast&country=CN&limit=${limit}`
+      const res = await fetch(url, {
+        headers: { 'user-agent': UA, accept: 'application/json' },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      })
+      if (!res.ok) throw new Error(`iTunes search ${res.status}`)
+      const data = await res.json()
+      const items = (data?.results ?? []).map((r) => ({
+        appleId: String(r.collectionId ?? ''),
+        title: r.collectionName ?? '',
+        author: r.artistName ?? '',
+        genre: r.primaryGenreName ?? '',
+        episodes: r.trackCount ?? 0,
+        logo: r.artworkUrl600 ?? r.artworkUrl100 ?? '',
+        feedUrl: r.feedUrl ?? '',
+      }))
+      return { items: items.filter((item) => item.title) }
+    })
+  }
+
   const disposers = []
 
   disposers.push(
@@ -642,6 +705,45 @@ export function apply(ctx, config = {}) {
           return sendJson(res, 405, { ok: false, error: 'method not allowed' })
         } catch (error) {
           log.warn?.(`xiaoyuzhou-hot: library ${error?.message ?? error}`)
+          return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/x-hot/search',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        try {
+          const url = new URL(req.url ?? '/x-hot/search', 'http://localhost')
+          const query = (url.searchParams.get('q') ?? '').trim()
+          if (!query) return sendJson(res, 400, { ok: false, error: 'q 不能为空' })
+          const limit = clampInt(url.searchParams.get('limit'), 20, 1, 50)
+          const data = await searchPodcasts(query, limit)
+          return sendJson(res, 200, { ok: true, query, ...data })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: search ${error?.message ?? error}`)
+          return sendJson(res, 502, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/x-hot/resolve',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        try {
+          const url = new URL(req.url ?? '/x-hot/resolve', 'http://localhost')
+          const podcast = await resolvePodcast(url.searchParams.get('url') ?? '')
+          return sendJson(res, 200, { ok: true, podcast })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: resolve ${error?.message ?? error}`)
           return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
         }
       },
@@ -723,6 +825,6 @@ export function apply(ctx, config = {}) {
   }, 'xiaoyuzhou-hot: unregister routes')
 
   log.info?.(
-    'xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/library(+relink), /x-hot/favorites, /x-hot/health registered',
+    'xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/search, /x-hot/resolve, /x-hot/library(+relink), /x-hot/favorites, /x-hot/health registered',
   )
 }

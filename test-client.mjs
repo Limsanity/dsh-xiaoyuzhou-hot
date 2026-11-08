@@ -138,7 +138,11 @@ await tick(2500)
 
 const rows = container.querySelectorAll('.xzr-row')
 console.log('list rows:', rows.length)
-if (rows.length < 10) throw new Error('expected list rows, got ' + rows.length)
+if (rows.length < 10) {
+  console.log('list state:', container.querySelector('.xzr-state')?.textContent ?? '(none)')
+  console.log('active tab:', container.querySelector('.xzr-tab.is-active')?.textContent)
+  throw new Error('expected list rows, got ' + rows.length)
+}
 
 // ---- 5. 播客 → 频道 ----------------------------------------------------------
 const firstPodcast = rows[0].querySelector('.xzr-title')?.textContent ?? ''
@@ -149,7 +153,11 @@ const chTitle = container.querySelector('.xzr-ch-title')?.textContent ?? ''
 const chRows = Array.from(container.querySelectorAll('.xzr-row'))
 console.log('channel:', JSON.stringify(chTitle), '| episodes:', chRows.length, '| opened:', opened.length, '| sessionCalls:', sessionCalls.length)
 if (!chTitle.includes(firstPodcast)) throw new Error(`channel title mismatch: ${chTitle} vs ${firstPodcast}`)
-if (chRows.length < 5) throw new Error('channel has no episodes')
+if (chRows.length < 5) {
+  console.log('channel state text:', container.querySelector('.xzr-state')?.textContent ?? '(none)')
+  console.log('channel html:', container.innerHTML.slice(0, 600))
+  throw new Error('channel has no episodes')
+}
 if (opened.length !== 0) throw new Error('clicking a podcast must not open the browser')
 if (sessionCalls.length !== 0) throw new Error('clicking a podcast must not start a session')
 
@@ -274,4 +282,43 @@ await tick(2500)
 console.log('favorite row -> channel:', container.querySelector('.xzr-ch-title')?.textContent)
 if (!container.querySelector('.xzr-ch-head')) throw new Error('favorite row should open the channel')
 
-console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html / preview-favorites.html')
+// 搜索 tab:关键词搜(Apple 目录)
+await click(container.querySelector('.xzr-back'))
+await tick(600)
+const tabsFinal = container.querySelectorAll('.xzr-tab')
+await click(tabsFinal[5])
+await tick(300)
+const searchInput = container.querySelector('.xzr-search-hero input')
+if (!searchInput) throw new Error('search input missing')
+await act(async () => {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+  setter.call(searchInput, '搞钱女孩')
+  searchInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+})
+await click(container.querySelector('.xzr-search-hero button'))
+await tick(3500)
+const searchRows = container.querySelectorAll('.xzr-row')
+console.log('search rows:', searchRows.length, '| first:', searchRows[0]?.querySelector('.xzr-title')?.textContent)
+if (searchRows.length === 0) throw new Error('search returned nothing')
+writeFileSync(new URL('./preview-search.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 搜索'))
+
+// 点第一条结果 → 用 appleId 打开频道
+await click(searchRows[0])
+await tick(3000)
+console.log('search -> channel:', container.querySelector('.xzr-ch-title')?.textContent, '| episodes:', container.querySelectorAll('.xzr-row').length)
+if (!container.querySelector('.xzr-ch-head')) throw new Error('search result should open a channel')
+
+// 粘贴小宇宙链接 → resolve 出 pid 再打开
+await click(container.querySelector('.xzr-back'))
+await tick(500)
+const input2 = container.querySelector('.xzr-search-hero input')
+await act(async () => {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+  setter.call(input2, 'https://www.xiaoyuzhoufm.com/episode/6ac6a657e742e36efcbf74af')
+  input2.dispatchEvent(new window.Event('input', { bubbles: true }))
+})
+await click(container.querySelector('.xzr-search-hero button'))
+await tick(4000)
+console.log('resolve -> channel:', container.querySelector('.xzr-ch-title')?.textContent, '| link:', container.querySelector('.xzr-ch-actions .xzr-refresh') ? 'yes' : 'no')
+
+console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html / preview-favorites.html / preview-search.html')

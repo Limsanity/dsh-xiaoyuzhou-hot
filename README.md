@@ -95,6 +95,24 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | `POST /x-hot/favorites` | 收藏(JSON: `key/title/author/genre/url/appleId/logo`) |
 | `DELETE /x-hot/favorites?id=<播客 id>` | 取消收藏 |
 
+## 找榜单外的播客
+
+榜单只有 8k 档,想找没上榜的频道有两条路(都在 `搜索` tab 里):
+
+1. **关键词搜**:走 Apple Podcasts 目录(`itunes.apple.com/search?entity=podcast&country=CN`),返回 `appleId`,点一下就能用它的 RSS 打开频道、直接总结;右侧 `☆` 可以顺手收藏。
+2. **粘贴小宇宙链接**:播客页、单集页、或一串 24 位 id 都行。宿主会去读页面 SSR,解析出 `pid` 再打开——这条路的频道带「在小宇宙」链接。
+
+为什么不用官方搜索:小宇宙网页没有搜索页(`/search` 404),App 的搜索接口要登录态 token;Apple 目录是唯一免登录、还能直接拿到 RSS 的入口。
+
+区别记一下:关键词搜出来的频道只有 `appleId`,频道里没有「在小宇宙 ↗」按钮;想要那个按钮就用粘链接的方式(链接里能解析出 `pid`)。
+
+### 路由
+
+| 路由 | 说明 |
+|---|---|
+| `GET /x-hot/search?q=<关键词>&limit=1..50` | Apple 播客目录搜索(中国区) |
+| `GET /x-hot/resolve?url=<小宇宙链接或 24 位 id>` | 解析出 `{pid,title,author,episodes,logo,url}` |
+
 ## 频道页从哪拿分集
 
 小宇宙网页只渲染最新 15 集,没有分页接口;App API 要登录态。所以分集走播客自己的 RSS:

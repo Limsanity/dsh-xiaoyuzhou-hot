@@ -15,11 +15,17 @@ const TABS = [
   { key: 'episodes', label: '热门单集' },
   { key: 'library', label: '我的总结' },
   { key: 'favorites', label: '我的收藏' },
+  { key: 'search', label: '搜索' },
 ]
 
 /** 播客 id(小宇宙 24 位 hex),取不到就返回空串 */
 function pidOf(podcast) {
   return /\/podcast\/([0-9a-f]{24})/i.exec(podcast?.url ?? '')?.[1] ?? ''
+}
+
+/** 播客在收藏里的键:优先 pid,只有 Apple 信息时用 apple:<id> */
+function favoriteKey(podcast) {
+  return pidOf(podcast) || (podcast?.appleId ? `apple:${podcast.appleId}` : '')
 }
 
 const PAGE_LIMIT = 100
@@ -54,6 +60,11 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   const [channel, setChannel] = useState(null)
   const [library, setLibrary] = useState([])
   const [favorites, setFavorites] = useState([])
+  const [searchQ, setSearchQ] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searchTouched, setSearchTouched] = useState(false)
   const [relinking, setRelinking] = useState(false)
   const [relinkNote, setRelinkNote] = useState('')
   const ctrl = useRef(null)
@@ -90,7 +101,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   }, [])
 
   const load = useCallback(async (nextKind) => {
-    if (nextKind === 'library' || nextKind === 'favorites') {
+    if (nextKind === 'library' || nextKind === 'favorites' || nextKind === 'search') {
       setLoading(false)
       setError('')
       return
@@ -191,6 +202,34 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
     }
   }, [openChannel])
 
+  const runSearch = useCallback(async (raw) => {
+    const text = String(raw ?? '').trim()
+    if (!text) return
+    const isLink = /xiaoyuzhoufm\.com\/(podcast|episode)\//i.test(text) || /^[0-9a-f]{24}$/i.test(text)
+    setSearching(true)
+    setSearchError('')
+    setSearchResults([])
+    setSearchTouched(true)
+    try {
+      if (isLink) {
+        const res = await fetch(`/x-hot/resolve?url=${encodeURIComponent(text)}`)
+        const data = await res.json().catch(() => null)
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+        setSearching(false)
+        openChannel({ ...data.podcast, appleId: '' })
+        return
+      }
+      const res = await fetch(`/x-hot/search?q=${encodeURIComponent(text)}&limit=20`)
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      setSearchResults(data.items ?? [])
+    } catch (error) {
+      setSearchError(String(error?.message ?? error))
+    } finally {
+      setSearching(false)
+    }
+  }, [openChannel])
+
   const open = useCallback((url) => {
     if (!url) return
     if (typeof openExternal === 'function') return openExternal(url)
@@ -237,7 +276,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   }, [])
 
   const toggleFavorite = useCallback((podcast) => {
-    const pid = pidOf(podcast)
+    const pid = favoriteKey(podcast)
     if (!pid) return
     if (favorites.some((item) => item.key === pid)) {
       setFavorites((prev) => prev.filter((item) => item.key !== pid))
@@ -313,7 +352,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           summarize={summarizeEpisode}
           openExternal={open}
           isDone={(ep) => libraryIndex.has(ep)}
-          isFavorite={favoriteIndex.has(pidOf(channel.podcast))}
+          isFavorite={favoriteIndex.has(favoriteKey(channel.podcast))}
           onToggleFavorite={toggleFavorite}
         />
       </>
@@ -382,6 +421,95 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       </header>
 
       <div className="xzr-body">
+        {kind === 'search' ? (
+          <div className="xzr-search-view">
+            <div className="xzr-search-hero">
+              <input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') runSearch(searchQ)
+                }}
+                placeholder="搜播客名,或粘贴小宇宙链接 / 24 位 id"
+                aria-label="搜播客或粘贴小宇宙链接"
+              />
+              <button type="button" onClick={() => runSearch(searchQ)} disabled={searching}>
+                {searching ? '搜索中…' : '搜索'}
+              </button>
+            </div>
+
+            {searching ? <Skeleton /> : null}
+
+            {!searching && searchError ? (
+              <div className="xzr-state xzr-error" role="alert">
+                <strong>没找到</strong>
+                <p>{searchError}</p>
+              </div>
+            ) : null}
+
+            {!searching && !searchError && searchTouched && searchResults.length === 0 ? (
+              <div className="xzr-state">
+                <strong>没有匹配的播客</strong>
+                <p>换个关键词,或直接粘贴小宇宙的播客 / 单集链接</p>
+              </div>
+            ) : null}
+
+            {searchResults.length > 0 ? (
+              <ol className="xzr-list">
+                {searchResults.map((item) => (
+                  <li key={item.appleId || item.title} className="xzr-item">
+                    <button
+                      type="button"
+                      className="xzr-row"
+                      onClick={() =>
+                        openChannel({
+                          title: item.title,
+                          author: item.author,
+                          genre: item.genre,
+                          episodes: item.episodes,
+                          logo: item.logo,
+                          appleId: item.appleId,
+                          url: '',
+                        })
+                      }
+                      aria-label={`打开 ${item.title} 的频道`}
+                    >
+                      {item.logo ? (
+                        <img className="xzr-logo" src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                      ) : (
+                        <span className="xzr-logo xzr-logo-empty" />
+                      )}
+                      <span className="xzr-main">
+                        <span className="xzr-title" title={item.title}>{item.title}</span>
+                        <span className="xzr-sub">
+                          {item.author || '—'}
+                          {item.genre ? <em>· {item.genre}</em> : null}
+                          {item.episodes ? <em>· {item.episodes} 集</em> : null}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`xzr-ext xzr-ext-star${favoriteIndex.has(favoriteKey(item)) ? ' is-on' : ''}`}
+                      onClick={() => toggleFavorite(item)}
+                      aria-label={favoriteIndex.has(favoriteKey(item)) ? '取消收藏' : '收藏这个播客'}
+                    >
+                      {favoriteIndex.has(favoriteKey(item)) ? '★' : '☆'}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+
+            {!searchTouched ? (
+              <div className="xzr-state">
+                <strong>找榜单外的播客</strong>
+                <p>输入名字搜(走 Apple 播客目录),或粘贴小宇宙链接直接打开频道</p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {kind === 'favorites' ? (
           <FavoritesList
             items={favorites}
@@ -405,9 +533,9 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           />
         ) : null}
 
-        {kind !== 'library' && kind !== 'favorites' && loading && items.length === 0 ? <Skeleton /> : null}
+        {kind !== 'library' && kind !== 'favorites' && kind !== 'search' && loading && items.length === 0 ? <Skeleton /> : null}
 
-        {kind !== 'library' && kind !== 'favorites' && !loading && error ? (
+        {kind !== 'library' && kind !== 'favorites' && kind !== 'search' && !loading && error ? (
           <div className="xzr-state xzr-error" role="alert">
             <strong>没拉到榜单</strong>
             <p>{error}</p>
@@ -415,14 +543,14 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           </div>
         ) : null}
 
-        {kind !== 'library' && kind !== 'favorites' && !loading && !error && filtered.length === 0 ? (
+        {kind !== 'library' && kind !== 'favorites' && kind !== 'search' && !loading && !error && filtered.length === 0 ? (
           <div className="xzr-state">
             <strong>{query ? '没有匹配的条目' : '榜单是空的'}</strong>
             <p>{query ? '换个关键词试试' : '上游暂时没有返回数据'}</p>
           </div>
         ) : null}
 
-        {kind !== 'library' && kind !== 'favorites' && filtered.length > 0 ? (
+        {kind !== 'library' && kind !== 'favorites' && kind !== 'search' && filtered.length > 0 ? (
           <ol className="xzr-list">
             {filtered.map((item) => (
               <li key={`${item.rank}-${item.title}`} className="xzr-item">
@@ -481,7 +609,9 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
             ? `${library.length} 条记录 · 存在本机`
             : kind === 'favorites'
               ? `${favorites.length} 个频道 · 存在本机`
-              : query
+              : kind === 'search'
+                ? `${searchResults.length} 个结果 · 数据来自 Apple 播客目录`
+                : query
               ? `${filtered.length} / ${items.length} 条`
               : `前 ${items.length} 名`}
           {kind !== 'library' && total > items.length ? ` · 共 ${total} 档上榜` : ''}
@@ -723,6 +853,15 @@ const STYLES = `
 .xzr-ch-done{color:var(--dsw-alias-state-business-primary)!important}
 .xzr-ch-actions{display:flex;align-items:center;gap:8px;flex:none}
 .xzr-ch-search{min-width:170px}
+.xzr-search-hero{display:flex;gap:8px;margin:8px 14px 10px}
+.xzr-search-hero input{flex:1;min-width:0;height:32px;padding:0 10px;border-radius:var(--dsw-radius-sm);
+  border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px}
+.xzr-search-hero input:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}
+.xzr-search-hero button{height:32px;padding:0 14px;border-radius:var(--dsw-radius-sm);border:0;cursor:pointer;
+  background:var(--dsw-alias-brand-primary);color:#fff;font-size:12.5px}
+.xzr-search-hero button:disabled{opacity:.6;cursor:default}
+.xzr-ext.xzr-ext-star{opacity:1;color:var(--dsw-alias-label-tertiary);font-size:14px;line-height:1}
+.xzr-ext.xzr-ext-star.is-on{color:#c08a2e}
 .xzr-stat-cta b{color:var(--dsw-alias-brand-primary);font-size:12px}
 .xzr-star-mark{display:inline-block;margin-right:6px;padding:0 5px;border-radius:4px;font-size:10.5px;
   color:#c08a2e;background:rgba(192,138,46,.14)}
