@@ -41,7 +41,7 @@ function initialKind() {
   return 'podcasts'
 }
 
-export function HotPanel({ summarize, openExternal }) {
+export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession, openSession }) {
   const [kind, setKind] = useState(initialKind)
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
@@ -202,6 +202,16 @@ export function HotPanel({ summarize, openExternal }) {
         }
       })
       .catch(() => {})
+    return key
+  }, [])
+
+  const linkSession = useCallback((key, sessionId) => {
+    setLibrary((prev) => prev.map((row) => (row.key === key ? { ...row, sessionId } : row)))
+    fetch('/x-hot/library', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key, sessionId }),
+    }).catch(() => {})
   }, [])
 
   const removeSummarized = useCallback((key) => {
@@ -214,9 +224,14 @@ export function HotPanel({ summarize, openExternal }) {
       window.open(item.url, '_blank', 'noopener,noreferrer')
       return
     }
+    // 先记下"点之前有哪些会话",点完再找新冒出来的那个
+    const before = typeof sessionIds === 'function' ? sessionIds() : null
     summarize(item)
-    markSummarized(item, podcast)
-  }, [summarize, markSummarized])
+    const key = markSummarized(item, podcast)
+    if (key && before && typeof watchNewSession === 'function') {
+      watchNewSession(before, (sessionId) => linkSession(key, sessionId))
+    }
+  }, [summarize, markSummarized, linkSession, sessionIds, watchNewSession])
 
   const isEpisode = kind === 'episodes'
 
@@ -302,7 +317,13 @@ export function HotPanel({ summarize, openExternal }) {
 
       <div className="xzr-body">
         {kind === 'library' ? (
-          <LibraryList items={library} query={query} openExternal={open} onRemove={removeSummarized} />
+          <LibraryList
+            items={library}
+            query={query}
+            openExternal={open}
+            onRemove={removeSummarized}
+            openSession={openSession}
+          />
         ) : null}
 
         {kind !== 'library' && loading && items.length === 0 ? <Skeleton /> : null}
@@ -391,7 +412,7 @@ export function HotPanel({ summarize, openExternal }) {
   )
 }
 
-function LibraryList({ items, query, openExternal, onRemove }) {
+function LibraryList({ items, query, openExternal, onRemove, openSession }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return items
@@ -425,8 +446,12 @@ function LibraryList({ items, query, openExternal, onRemove }) {
           <button
             type="button"
             className="xzr-row"
-            onClick={() => openExternal(item.url)}
-            title={item.url || '暂无链接'}
+            onClick={() => {
+              // 有会话就跳回那次总结;没有(或跳失败)再退回小宇宙原页
+              if (item.sessionId && typeof openSession === 'function' && openSession(item.sessionId)) return
+              openExternal(item.url)
+            }}
+            title={item.sessionId ? '打开那次总结会话' : item.url || '暂无链接'}
           >
             <span className="xzr-rank xzr-rank-done">✓</span>
             <span className="xzr-main">
@@ -434,9 +459,31 @@ function LibraryList({ items, query, openExternal, onRemove }) {
               <span className="xzr-sub">
                 {item.podcast || '—'}
                 <em>· {formatWhen(item.at)}</em>
+                {item.sessionId ? <em className="xzr-ch-done">· 已关联会话</em> : null}
+              </span>
+            </span>
+            <span className="xzr-stats">
+              <span className="xzr-stat">
+                <b>{item.sessionId ? '打开会话' : '小宇宙'}</b>
+                <i>{item.sessionId ? '接着聊' : '无会话记录'}</i>
               </span>
             </span>
           </button>
+          {item.sessionId ? (
+            <button
+              type="button"
+              className="xzr-ext xzr-ext-left"
+              onClick={() => openExternal(item.url)}
+              title="在小宇宙打开这一集"
+              aria-label="在小宇宙打开这一集"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 4h6v6" />
+                <path d="M20 4 10 14" />
+                <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
+              </svg>
+            </button>
+          ) : null}
           <button
             type="button"
             className="xzr-ext xzr-ext-always"
@@ -507,6 +554,7 @@ const STYLES = `
   color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
 .xzr-rank-done{color:var(--dsw-alias-state-business-primary);font-weight:700}
 .xzr-ext.xzr-ext-always{opacity:.55}
+.xzr-ext.xzr-ext-left{right:34px}
 .xzr-stat-cta{opacity:0;transition:opacity .15s}
 .xzr-item:hover .xzr-stat-cta,.xzr-row:focus-visible .xzr-stat-cta{opacity:1}
 .xzr-state-actions{display:flex;gap:8px;justify-content:center}

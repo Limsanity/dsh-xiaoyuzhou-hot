@@ -38,11 +38,20 @@ console.log('PANEL_ID:', mod.PANEL_ID, '| inject:', JSON.stringify(mod.inject))
 
 // ---- 2. slots + fake uiWorkspace --------------------------------------------
 const sessionCalls = []
-const fakeWorkspace = { startSession: (workspaceId, options) => sessionCalls.push({ workspaceId, options }) }
+const openedSessions = []
+const fakeWorkspace = {
+  startSession: (workspaceId, options) => sessionCalls.push({ workspaceId, options }),
+  openSession: (sessionId) => openedSessions.push(sessionId),
+}
+const byId = { existing: {} }
+const fakeSessions = { list: { getSnapshot: () => ({ phase: 'ready', byId }) } }
 const regs = []
 const ctx = {
   logger: { error: console.error },
-  inject: (_names, fn) => { fn({ uiWorkspace: fakeWorkspace }) },
+  inject: (names, fn) => {
+    const services = { uiWorkspace: fakeWorkspace, sessions: fakeSessions }
+    fn(Object.fromEntries(names.map((name) => [name, services[name]])))
+  },
   slots: { inject: (_name, fn) => fn(), register: (meta, comp) => { regs.push({ meta, comp }); return () => {} } },
 }
 mod.apply(ctx)
@@ -118,6 +127,7 @@ if (sessionCalls.length !== 0) throw new Error('clicking a podcast must not star
 
 // 频道里点第一集 → 新会话 + 预填(带音频直链)
 await click(chRows[0])
+setTimeout(() => { byId['sum-1'] = {} }, 400)
 const chCall = sessionCalls.at(-1)
 const chPrompt = chCall?.options?.prompt ?? ''
 console.log('channel episode -> sessionCalls:', sessionCalls.length, '| promptLen:', chPrompt.length)
@@ -125,7 +135,10 @@ if (!chPrompt.includes('音频直链：')) throw new Error('prompt missing audio
 console.log('--- channel prompt head ---\n' + chPrompt.split('\n').slice(0, 7).join('\n'))
 console.log('library writes:', libraryPosts.length, '|', JSON.stringify(libraryPosts.at(-1)?.title))
 if (libraryPosts.length === 0) throw new Error('clicking an episode should record it in the library')
-await tick(600)
+await tick(1400)
+const linkedPost = libraryPosts.filter((row) => row.sessionId).at(-1)
+console.log('session link write:', JSON.stringify(linkedPost))
+if (!linkedPost || linkedPost.sessionId !== 'sum-1') throw new Error('session id was not written back to the library')
 const doneChip = container.querySelector('.xzr-done')
 console.log('done chip:', doneChip?.textContent ?? '(none)')
 if (!doneChip) throw new Error('summarized episode should show the done chip')
@@ -192,6 +205,13 @@ const libRows = container.querySelectorAll('.xzr-row')
 const libTitle = container.querySelector('.xzr-tab.is-active')?.textContent
 console.log('library tab:', libTitle, '| rows:', libRows.length, '| first:', libRows[0]?.querySelector('.xzr-title')?.textContent)
 if (libRows.length === 0) throw new Error('library tab should list the summary we just started')
+const linkChip = container.querySelector('.xzr-ch-done')
+const linkedRow = [...container.querySelectorAll('.xzr-row')].find((row) => row.textContent.includes('已关联会话'))
+console.log('library link chip:', linkChip?.textContent ?? '(none)', '| linked row:', linkedRow?.querySelector('.xzr-title')?.textContent)
+if (!linkedRow) throw new Error('no linked row found')
+await click(linkedRow)
+console.log('library row click -> sessions opened:', JSON.stringify(openedSessions), '| external opens:', opened.length)
+if (openedSessions.at(-1) !== 'sum-1') throw new Error('clicking a linked row should open its session')
 writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的总结'))
 
 console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html')

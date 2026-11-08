@@ -260,14 +260,21 @@ class Library {
     await this.load()
     const key = String(input?.key ?? '').slice(0, 400)
     if (!key) throw new Error('key 不能为空')
-    const item = {
-      key,
-      title: String(input?.title ?? '').slice(0, 300),
-      podcast: String(input?.podcast ?? '').slice(0, 200),
-      url: String(input?.url ?? '').slice(0, 600),
-      podcastUrl: String(input?.podcastUrl ?? '').slice(0, 600),
-      at: Number.isFinite(input?.at) ? input.at : Date.now(),
+    // 合并写:补 sessionId 之类的局部更新不会把标题/链接冲掉
+    const existing = this.items.get(key) ?? {}
+    const item = { ...existing, key }
+    const fields = [
+      ['title', 300],
+      ['podcast', 200],
+      ['url', 600],
+      ['podcastUrl', 600],
+      ['sessionId', 100],
+    ]
+    for (const [field, max] of fields) {
+      const value = input?.[field]
+      if (typeof value === 'string') item[field] = value.slice(0, max)
     }
+    item.at = Number.isFinite(input?.at) ? input.at : (existing.at ?? Date.now())
     this.items.delete(key)
     this.items.set(key, item)
     while (this.items.size > MAX_LIBRARY) this.items.delete(this.items.keys().next().value)

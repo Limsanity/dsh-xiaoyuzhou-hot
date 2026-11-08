@@ -28,12 +28,25 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 - 面板里:**行首 ✓ + 「已总结」小标签**、频道页头部「已总结 N」、`我的总结` tab(可按关键词过滤,点 × 取消标记);
 - 会话侧:预填 prompt 的第一行就是 `总结《播客》单集标题`,而 DSH 的默认标题 provider 从首个 prompt 生成标题,所以左侧会话列表里能直接认出是哪一集。
 
+### 关联到那次会话
+
+`我的总结` 里的条目可以点了直接跳回总结会话:
+
+```
+点单集 → sessions.list 快照 S0 → startSession() → 每 250ms 看快照
+       → 恰好多出 1 个会话(sessionId) → POST /x-hot/library { key, sessionId }
+```
+
+- `startSession()` 不返回 id,所以用"前后快照差"来认定:只多出一个才算,多出多个(并发操作)就放弃关联——宁可没链接,也不链错;
+- 6 秒内没等到就放弃(比如 DSH 复用了空白会话,不会新建);
+- 有 `sessionId` 的行:点击 → `uiWorkspace.openSession(id)` 跳回那次对话,右侧另有 ↗ 去小宇宙;没有的行点击仍然是打开小宇宙。
+
 ### 路由
 
 | 路由 | 说明 |
 |---|---|
 | `GET /x-hot/library` | 读全部记录(按时间倒序) |
-| `POST /x-hot/library` | 记一条(JSON: `key/title/podcast/url/podcastUrl`) |
+| `POST /x-hot/library` | 记一条(JSON: `key/title/podcast/url/podcastUrl/sessionId`);**局部更新会与已有条目合并**,只传 `{key, sessionId}` 不会冲掉标题 |
 | `DELETE /x-hot/library?key=...` | 取消一条 |
 
 ## 频道页从哪拿分集
