@@ -62,6 +62,7 @@ node scripts/relink-sessions.mjs             # 回写 sessionId(走插件接口)
 
 - 会话文件是**多段 zstd 拼接**,Node 的 `zstdDecompressSync` 只解第一段(约 200 字节),必须用 `zstd -dc`;
 - 会话里的中文是 `\uXXXX` 转义,**不能直接对原文 grep 中文**,要逐行 `JSON.parse`。
+还有一个坑:**SessionId 是带 `session-` 前缀的目录名**(`session-<uuid>`),不是裸 uuid——剥掉前缀的话 `uiWorkspace.openSession` 会抛错,表现为"点了没反应/跳去浏览器"。
 
 ### 路由
 

@@ -58,7 +58,8 @@ function* sessionFiles(root) {
       } catch {
         continue
       }
-      yield { sessionId: entry.slice('session-'.length), file }
+      // 目录名(含 session- 前缀)才是 Host 认识的 SessionId
+      yield { sessionId: entry, file }
     }
   }
 }

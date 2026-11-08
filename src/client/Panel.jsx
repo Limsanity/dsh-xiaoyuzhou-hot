@@ -439,6 +439,25 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
 }
 
 function LibraryList({ items, query, openExternal, onRemove, openSession }) {
+  const [note, setNote] = useState('')
+
+  const openItem = useCallback(
+    (item) => {
+      if (!item.sessionId) {
+        openExternal(item.url)
+        return
+      }
+      const opened = typeof openSession === 'function' && openSession(item.sessionId)
+      if (opened) {
+        setNote('')
+        return
+      }
+      setNote('这个会话打不开(可能已被删除),可以在小宇宙里重新看这一集')
+      setTimeout(() => setNote(''), 4000)
+    },
+    [openExternal, openSession],
+  )
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return items
@@ -466,17 +485,15 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
   }
 
   return (
-    <ol className="xzr-list">
-      {filtered.map((item) => (
+    <>
+      {note ? <div className="xzr-banner" role="status">{note}</div> : null}
+      <ol className="xzr-list">
+        {filtered.map((item) => (
         <li key={item.key} className="xzr-item">
           <button
             type="button"
             className="xzr-row"
-            onClick={() => {
-              // 有会话就跳回那次总结;没有(或跳失败)再退回小宇宙原页
-              if (item.sessionId && typeof openSession === 'function' && openSession(item.sessionId)) return
-              openExternal(item.url)
-            }}
+            onClick={() => openItem(item)}
             aria-label={item.sessionId ? `打开那次总结会话:${item.title}` : `在小宇宙打开:${item.title}`}
           >
             <span className="xzr-rank xzr-rank-done">✓</span>
@@ -517,9 +534,10 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
           >
             ×
           </button>
-        </li>
-      ))}
-    </ol>
+          </li>
+        ))}
+      </ol>
+    </>
   )
 }
 
@@ -578,7 +596,7 @@ const STYLES = `
   color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
 .xzr-rank-done{color:var(--dsw-alias-state-business-primary);font-weight:700}
 .xzr-ext.xzr-ext-always{opacity:.55}
-.xzr-ext.xzr-ext-left{right:34px}
+.xzr-ext.xzr-ext-left{right:38px}
 .xzr-stat-cta{opacity:0;transition:opacity .15s}
 .xzr-item:hover .xzr-stat-cta,.xzr-row:focus-visible .xzr-stat-cta{opacity:1}
 .xzr-state-actions{display:flex;gap:8px;justify-content:center}
@@ -608,13 +626,13 @@ const STYLES = `
 .xzr-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:6px max(12px,calc((100% - 1040px)/2 + 4px)) 8px}
 .xzr-list{list-style:none;margin:0;padding:0}
 .xzr-item{position:relative}
-.xzr-ext{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:26px;height:26px;
+.xzr-ext{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:26px;height:26px;
   display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--dsw-radius-sm);
   background:transparent;color:var(--dsw-alias-label-caption);cursor:pointer;opacity:0;
   transition:opacity .15s,background .15s,color .15s}
 .xzr-item:hover .xzr-ext,.xzr-ext:focus-visible{opacity:1}
 .xzr-ext:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.xzr-row{display:flex;align-items:center;gap:12px;width:100%;padding:9px 40px 9px 10px;border:0;background:transparent;
+.xzr-row{display:flex;align-items:center;gap:12px;width:100%;padding:9px 72px 9px 10px;border:0;background:transparent;
   color:inherit;text-align:left;cursor:pointer;border-radius:var(--dsw-radius-md);transition:background .12s}
 .xzr-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .xzr-rank{flex:none;width:22px;text-align:center;font-size:12px;font-variant-numeric:tabular-nums;
@@ -635,6 +653,8 @@ const STYLES = `
 .xzr-stat{display:flex;flex-direction:column;align-items:flex-end;min-width:52px}
 .xzr-stat b{font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}
 .xzr-stat i{font-style:normal;font-size:10.5px;color:var(--dsw-alias-label-caption)}
+.xzr-banner{margin:6px 14px;padding:7px 10px;border-radius:var(--dsw-radius-sm);
+  background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12px}
 .xzr-state{padding:56px 24px;text-align:center;color:var(--dsw-alias-label-tertiary)}
 .xzr-state strong{display:block;font-size:13.5px;color:var(--dsw-alias-label-secondary);margin-bottom:6px}
 .xzr-state p{margin:0 0 12px;font-size:12px;color:var(--dsw-alias-label-caption)}

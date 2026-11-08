@@ -10,10 +10,10 @@ import { zstdCompressSync } from 'node:zlib'
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'xzr-relink-'))
 const { apply } = await import('./lib/index.js')
 
-const sessionId = 'abc12345-0000-4000-8000-000000000001'
+const sessionId = 'session-abc12345-0000-4000-8000-000000000001'
 const prompt = '总结《搞钱女孩》海盐：5 年医护月入 2K\n\n播客：搞钱女孩\n单集页：https://www.ximalaya.com/sound/1\n'
 const event = { type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: prompt }] } }
-const dir = join(process.env.DSH_HOME, 'sessions', '--tmp-workspace--', `session-${sessionId}`)
+const dir = join(process.env.DSH_HOME, 'sessions', '--tmp-workspace--', sessionId)
 mkdirSync(dir, { recursive: true })
 writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(JSON.stringify(event) + '\n', 'utf8')))
 

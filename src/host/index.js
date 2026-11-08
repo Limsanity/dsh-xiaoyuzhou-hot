@@ -430,7 +430,8 @@ async function listSessionFiles(root, limit) {
       } catch {
         continue
       }
-      files.push({ sessionId: entry.slice('session-'.length), file })
+      // 会话 id 就是目录名(带 session- 前缀);剥掉前缀会得到一个 Host 不认识的 id
+      files.push({ sessionId: entry, file })
       if (files.length >= limit) return files
     }
   }
