@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChannelView } from './Channel.jsx'
 import { formatClock, formatCount, formatRate, formatWhen } from './format.js'
+import { createLibraryIndex, keyOf } from './library-index.js'
 
 const TABS = [
   { key: 'podcasts', label: '热门播客' },
@@ -19,11 +20,6 @@ const TABS = [
 /** 播客 id(小宇宙 24 位 hex),取不到就返回空串 */
 function pidOf(podcast) {
   return /\/podcast\/([0-9a-f]{24})/i.exec(podcast?.url ?? '')?.[1] ?? ''
-}
-
-/** 单集在本地记录里的键:优先用 id,退化成链接 */
-function keyOf(episode) {
-  return String(episode?.id || episode?.url || episode?.title || '')
 }
 
 const PAGE_LIMIT = 100
@@ -63,7 +59,8 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   const ctrl = useRef(null)
   const channelCtrl = useRef(null)
 
-  const libraryIndex = useMemo(() => new Map(library.map((item) => [item.key, item])), [library])
+  // id 一样算已总结;标题一样也算(小宇宙 eid 和 RSS guid 不是一套 id)
+  const libraryIndex = useMemo(() => createLibraryIndex(library), [library])
   const favoriteIndex = useMemo(() => new Set(favorites.map((item) => item.key)), [favorites])
 
   useEffect(() => {
@@ -201,7 +198,9 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   }, [openExternal])
 
   const markSummarized = useCallback((item, podcast) => {
-    const key = keyOf(item)
+    // 同一集可能换了来源(id 不同):先按标题找已有记录,别重复建行
+    const known = libraryIndex.find(item)
+    const key = known?.key || keyOf(item)
     if (!key) return
     const entry = {
       key,
@@ -226,7 +225,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       })
       .catch(() => {})
     return key
-  }, [])
+  }, [libraryIndex])
 
   const linkSession = useCallback((key, sessionId) => {
     setLibrary((prev) => prev.map((row) => (row.key === key ? { ...row, sessionId } : row)))
@@ -313,7 +312,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           onRetry={() => openChannel(channel.podcast)}
           summarize={summarizeEpisode}
           openExternal={open}
-          isDone={(ep) => libraryIndex.has(keyOf(ep))}
+          isDone={(ep) => libraryIndex.has(ep)}
           isFavorite={favoriteIndex.has(pidOf(channel.podcast))}
           onToggleFavorite={toggleFavorite}
         />
@@ -438,7 +437,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
                   <span className="xzr-main">
                     <span className="xzr-title" title={item.title}>{item.title}</span>
                     <span className="xzr-sub">
-                      {libraryIndex.has(keyOf(item)) ? <span className="xzr-done">✓ 已总结</span> : null}
+                      {libraryIndex.has(item) ? <span className="xzr-done">✓ 已总结</span> : null}
                       {!isEpisode && favoriteIndex.has(pidOf(item)) ? <span className="xzr-star-mark">★ 收藏</span> : null}
                       {item.author || '—'}
                       {item.genre ? <em>· {item.genre}</em> : null}

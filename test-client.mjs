@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
 import React from 'react'
+import { createLibraryIndex } from './src/client/library-index.js'
 
 const require = createRequire(import.meta.url)
 
@@ -50,6 +51,16 @@ if (!loaded) throw new Error('client bundle did not call __ModuleLoader__.load')
 const mod = loaded.factory(require)
 console.log('bundle id:', loaded.id, '| exports:', Object.keys(mod).sort().join(', '))
 console.log('PANEL_ID:', mod.PANEL_ID, '| inject:', JSON.stringify(mod.inject))
+
+// ---- 1.5 「已总结」索引:同一个单集换了来源(id 不同)也要认出来 ----
+{
+  const index = createLibraryIndex([{ key: '6ac6a657e742e36efcbf74af', title: '海盐：5 年医护月入 2K' }])
+  const fromRss = { id: 'xmly_track_1017953539', title: '海盐：5 年医护月入 2K' }
+  if (!index.has(fromRss)) throw new Error('cross-source title match failed')
+  if (index.find(fromRss)?.key !== '6ac6a657e742e36efcbf74af') throw new Error('should resolve to the existing key')
+  if (index.has({ id: 'other', title: '完全不同的单集' })) throw new Error('unrelated episode should not match')
+  console.log('library index: cross-source title match ok')
+}
 
 // ---- 2. slots + fake uiWorkspace --------------------------------------------
 const sessionCalls = []
