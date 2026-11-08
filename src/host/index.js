@@ -39,6 +39,24 @@ const MAX_EPISODES = 300
 const MAX_LIBRARY = 2000
 const LIBRARY_DIR = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'xiaoyuzhou-hot')
 const LIBRARY_FILE = join(LIBRARY_DIR, 'library.json')
+const FAVORITES_FILE = join(LIBRARY_DIR, 'favorites.json')
+/** 已读记录里允许写入的字段与长度上限 */
+const DEFAULT_ITEM_FIELDS = [
+  ['title', 300],
+  ['podcast', 200],
+  ['url', 600],
+  ['podcastUrl', 600],
+  ['sessionId', 100],
+]
+/** 收藏的播客频道 */
+const FAVORITE_ITEM_FIELDS = [
+  ['title', 300],
+  ['author', 200],
+  ['genre', 100],
+  ['url', 600],
+  ['appleId', 40],
+  ['logo', 600],
+]
 const SESSION_ROOT = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'sessions')
 const SESSION_SCAN_LIMIT = 400
 const UA =
@@ -218,8 +236,9 @@ function readJsonBody(req, limitBytes = 64 * 1024) {
  * 主文件被误删/写坏时还能从备份读回来。
  */
 class Library {
-  constructor(path, log) {
+  constructor(path, log, fields = DEFAULT_ITEM_FIELDS) {
     this.path = path
+    this.fields = fields
     this.backupPath = `${path}.bak`
     this.log = log
     this.items = new Map()
@@ -280,14 +299,7 @@ class Library {
     // 合并写:补 sessionId 之类的局部更新不会把标题/链接冲掉
     const existing = this.items.get(key) ?? {}
     const item = { ...existing, key }
-    const fields = [
-      ['title', 300],
-      ['podcast', 200],
-      ['url', 600],
-      ['podcastUrl', 600],
-      ['sessionId', 100],
-    ]
-    for (const [field, max] of fields) {
+    for (const [field, max] of this.fields) {
       const value = input?.[field]
       if (typeof value === 'string') item[field] = value.slice(0, max)
     }
@@ -477,6 +489,7 @@ export function apply(ctx, config = {}) {
   const inflight = new Map()
   const log = ctx.logger ?? console
   const library = new Library(LIBRARY_FILE, log)
+  const favorites = new Library(FAVORITES_FILE, log, FAVORITE_ITEM_FIELDS)
 
   function cached(key, ttl, producer) {
     const hit = cache.get(key)
@@ -638,6 +651,37 @@ export function apply(ctx, config = {}) {
   disposers.push(
     ctx.webServer.register({
       kind: 'exact',
+      path: '/x-hot/favorites',
+      handler: async (req, res) => {
+        const url = new URL(req.url ?? '/x-hot/favorites', 'http://localhost')
+        try {
+          if (req.method === 'GET') {
+            const items = await favorites.list()
+            return sendJson(res, 200, { ok: true, items, count: items.length })
+          }
+          if (req.method === 'POST') {
+            const body = await readJsonBody(req)
+            if (!String(body?.key ?? '').trim()) return sendJson(res, 400, { ok: false, error: 'key 不能为空' })
+            const item = await favorites.mark(body)
+            return sendJson(res, 200, { ok: true, item, count: (await favorites.list()).length })
+          }
+          if (req.method === 'DELETE') {
+            const key = url.searchParams.get('id') ?? url.searchParams.get('key') ?? ''
+            const removed = await favorites.unmark(key)
+            return sendJson(res, 200, { ok: true, removed, count: (await favorites.list()).length })
+          }
+          return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: favorites ${error?.message ?? error}`)
+          return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
       path: '/x-hot/library/relink',
       handler: async (req, res) => {
         if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
@@ -664,6 +708,7 @@ export function apply(ctx, config = {}) {
   // 退出/热重载前把待写记录落盘(debounce 窗口内的改动不丢)
   ctx.effect?.(() => () => {
     library.flushNow().catch(() => {})
+    favorites.flushNow().catch(() => {})
   }, 'xiaoyuzhou-hot: flush library on dispose')
 
   // 热重载时先摘掉旧路由,再挂新的;否则重复注册会抛错
@@ -677,5 +722,7 @@ export function apply(ctx, config = {}) {
     }
   }, 'xiaoyuzhou-hot: unregister routes')
 
-  log.info?.('xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/library(+relink), /x-hot/health registered')
+  log.info?.(
+    'xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/library(+relink), /x-hot/favorites, /x-hot/health registered',
+  )
 }

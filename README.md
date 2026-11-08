@@ -4,7 +4,8 @@ DSH Web GUI 插件:左侧边栏多一个榜单入口,点开在主列显示**小�
 
 - 播客行:**原地切到该播客的频道,列出分集**(不再跳浏览器)。
 - 单集行:**点一下新开一个 DSH 会话,并把"总结这一集"的任务预填进输入框**,回车即开跑;行尾的 ↗ 才是在小宇宙打开。
-- 总结过的单集会被记下来:列表里带 ✓、频道页显示「已总结 N」,并有第四个 tab「我的总结」按时间倒序列出全部记录。
+- 总结过的单集会被记下来:列表里带 ✓、频道页显示「已总结 N」,并有 tab「我的总结」按时间倒序列出全部记录。
+- 播客频道可以收藏(频道页右上角 `☆ 收藏`),收藏的频道在 tab「我的收藏」里,点一下直接进频道,不用每次回榜单里找。
 
 ![热门播客](docs/screenshot-podcasts.png)
 
@@ -71,6 +72,27 @@ node scripts/relink-sessions.mjs             # 回写 sessionId(走插件接口)
 | `GET /x-hot/library` | 读全部记录(按时间倒序) |
 | `POST /x-hot/library` | 记一条(JSON: `key/title/podcast/url/podcastUrl/sessionId`);**局部更新会与已有条目合并**,只传 `{key, sessionId}` 不会冲掉标题 |
 | `DELETE /x-hot/library?key=...` | 取消一条 |
+
+## 收藏(频道级)
+
+存在同一个目录下的 `favorites.json`(和已读记录共用一套存储类,只是字段不同):
+
+```
+$DSH_HOME/xiaoyuzhou-hot/favorites.json
+{ "version": 1, "items": [ { key: <播客 id>, title, author, genre, url, appleId, logo, at } ] }
+```
+
+- 频道页右上角 `☆ 收藏` / `★ 已收藏` 切换;
+- 榜单里的播客行会带一个小小的 `★ 收藏` 标记,一眼看出哪些已经收过;
+- `我的收藏` tab:点行 → 原地进频道;`×` → 取消收藏;支持关键词过滤。
+
+### 路由
+
+| 路由 | 说明 |
+|---|---|
+| `GET /x-hot/favorites` | 收藏列表(按收藏时间倒序) |
+| `POST /x-hot/favorites` | 收藏(JSON: `key/title/author/genre/url/appleId/logo`) |
+| `DELETE /x-hot/favorites?id=<播客 id>` | 取消收藏 |
 
 ## 频道页从哪拿分集
 

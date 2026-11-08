@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react'
 import { formatDay, formatDuration } from './format.js'
 
-export function ChannelView({ podcast, data, loading, error, onBack, onRetry, summarize, openExternal, isDone }) {
+export function ChannelView({ podcast, data, loading, error, onBack, onRetry, summarize, openExternal, isDone, isFavorite, onToggleFavorite }) {
   const [query, setQuery] = useState('')
   const episodes = data?.episodes ?? []
 
@@ -50,7 +50,17 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
             ) : null}
           </div>
           {podcast?.url ? (
-            <button type="button" className="xzr-refresh" onClick={() => openExternal(podcast.url)} title="在小宇宙打开这个播客">
+            <button
+              type="button"
+              className={`xzr-fav${isFavorite ? ' is-on' : ''}`}
+              onClick={() => onToggleFavorite?.(podcast)}
+              aria-label={isFavorite ? '取消收藏' : '收藏这个播客'}
+            >
+              {isFavorite ? '★ 已收藏' : '☆ 收藏'}
+            </button>
+          ) : null}
+          {podcast?.url ? (
+            <button type="button" className="xzr-refresh" onClick={() => openExternal(podcast.url)} aria-label="在小宇宙打开这个播客">
               小宇宙 ↗
             </button>
           ) : null}

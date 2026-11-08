@@ -13,7 +13,13 @@ const TABS = [
   { key: 'new', label: '新锐播客' },
   { key: 'episodes', label: '热门单集' },
   { key: 'library', label: '我的总结' },
+  { key: 'favorites', label: '我的收藏' },
 ]
+
+/** 播客 id(小宇宙 24 位 hex),取不到就返回空串 */
+function pidOf(podcast) {
+  return /\/podcast\/([0-9a-f]{24})/i.exec(podcast?.url ?? '')?.[1] ?? ''
+}
 
 /** 单集在本地记录里的键:优先用 id,退化成链接 */
 function keyOf(episode) {
@@ -51,12 +57,27 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   const [query, setQuery] = useState('')
   const [channel, setChannel] = useState(null)
   const [library, setLibrary] = useState([])
+  const [favorites, setFavorites] = useState([])
   const [relinking, setRelinking] = useState(false)
   const [relinkNote, setRelinkNote] = useState('')
   const ctrl = useRef(null)
   const channelCtrl = useRef(null)
 
   const libraryIndex = useMemo(() => new Map(library.map((item) => [item.key, item])), [library])
+  const favoriteIndex = useMemo(() => new Set(favorites.map((item) => item.key)), [favorites])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/x-hot/favorites')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data?.ok) setFavorites(data.items ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -72,7 +93,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   }, [])
 
   const load = useCallback(async (nextKind) => {
-    if (nextKind === 'library') {
+    if (nextKind === 'library' || nextKind === 'favorites') {
       setLoading(false)
       setError('')
       return
@@ -216,6 +237,32 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
     }).catch(() => {})
   }, [])
 
+  const toggleFavorite = useCallback((podcast) => {
+    const pid = pidOf(podcast)
+    if (!pid) return
+    if (favorites.some((item) => item.key === pid)) {
+      setFavorites((prev) => prev.filter((item) => item.key !== pid))
+      fetch(`/x-hot/favorites?id=${encodeURIComponent(pid)}`, { method: 'DELETE' }).catch(() => {})
+      return
+    }
+    const entry = {
+      key: pid,
+      title: podcast?.title ?? '',
+      author: podcast?.author ?? '',
+      genre: podcast?.genre ?? '',
+      url: podcast?.url ?? '',
+      appleId: podcast?.appleId ?? '',
+      logo: podcast?.logo ?? '',
+      at: Date.now(),
+    }
+    setFavorites((prev) => [entry, ...prev.filter((item) => item.key !== pid)])
+    fetch('/x-hot/favorites', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(entry),
+    }).catch(() => {})
+  }, [favorites])
+
   const relinkSessions = useCallback(async () => {
     setRelinking(true)
     setRelinkNote('')
@@ -267,6 +314,8 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           summarize={summarizeEpisode}
           openExternal={open}
           isDone={(ep) => libraryIndex.has(keyOf(ep))}
+          isFavorite={favoriteIndex.has(pidOf(channel.podcast))}
+          onToggleFavorite={toggleFavorite}
         />
       </>
     )
@@ -334,6 +383,19 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       </header>
 
       <div className="xzr-body">
+        {kind === 'favorites' ? (
+          <FavoritesList
+            items={favorites}
+            query={query}
+            openChannel={openChannel}
+            openExternal={open}
+            onRemove={(key) => {
+              setFavorites((prev) => prev.filter((item) => item.key !== key))
+              fetch(`/x-hot/favorites?id=${encodeURIComponent(key)}`, { method: 'DELETE' }).catch(() => {})
+            }}
+          />
+        ) : null}
+
         {kind === 'library' ? (
           <LibraryList
             items={library}
@@ -344,9 +406,9 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           />
         ) : null}
 
-        {kind !== 'library' && loading && items.length === 0 ? <Skeleton /> : null}
+        {kind !== 'library' && kind !== 'favorites' && loading && items.length === 0 ? <Skeleton /> : null}
 
-        {kind !== 'library' && !loading && error ? (
+        {kind !== 'library' && kind !== 'favorites' && !loading && error ? (
           <div className="xzr-state xzr-error" role="alert">
             <strong>没拉到榜单</strong>
             <p>{error}</p>
@@ -354,14 +416,14 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           </div>
         ) : null}
 
-        {kind !== 'library' && !loading && !error && filtered.length === 0 ? (
+        {kind !== 'library' && kind !== 'favorites' && !loading && !error && filtered.length === 0 ? (
           <div className="xzr-state">
             <strong>{query ? '没有匹配的条目' : '榜单是空的'}</strong>
             <p>{query ? '换个关键词试试' : '上游暂时没有返回数据'}</p>
           </div>
         ) : null}
 
-        {kind !== 'library' && filtered.length > 0 ? (
+        {kind !== 'library' && kind !== 'favorites' && filtered.length > 0 ? (
           <ol className="xzr-list">
             {filtered.map((item) => (
               <li key={`${item.rank}-${item.title}`} className="xzr-item">
@@ -377,6 +439,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
                     <span className="xzr-title" title={item.title}>{item.title}</span>
                     <span className="xzr-sub">
                       {libraryIndex.has(keyOf(item)) ? <span className="xzr-done">✓ 已总结</span> : null}
+                      {!isEpisode && favoriteIndex.has(pidOf(item)) ? <span className="xzr-star-mark">★ 收藏</span> : null}
                       {item.author || '—'}
                       {item.genre ? <em>· {item.genre}</em> : null}
                       {isEpisode ? null : <em>· {item.episodes} 集</em>}
@@ -417,7 +480,9 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
         <span>
           {kind === 'library'
             ? `${library.length} 条记录 · 存在本机`
-            : query
+            : kind === 'favorites'
+              ? `${favorites.length} 个频道 · 存在本机`
+              : query
               ? `${filtered.length} / ${items.length} 条`
               : `前 ${items.length} 名`}
           {kind !== 'library' && total > items.length ? ` · 共 ${total} 档上榜` : ''}
@@ -435,6 +500,74 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
         )}
       </footer>
     </div>
+  )
+}
+
+function FavoritesList({ items, query, openChannel, openExternal, onRemove }) {
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return items
+    return items.filter(
+      (item) =>
+        item.title?.toLowerCase().includes(q) ||
+        item.author?.toLowerCase().includes(q) ||
+        item.genre?.toLowerCase().includes(q),
+    )
+  }, [items, query])
+
+  if (items.length === 0) {
+    return (
+      <div className="xzr-state">
+        <strong>还没有收藏的播客</strong>
+        <p>进任意播客的频道页,点右上角「☆ 收藏」</p>
+      </div>
+    )
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <div className="xzr-state">
+        <strong>没有匹配的收藏</strong>
+        <p>换个关键词试试</p>
+      </div>
+    )
+  }
+
+  return (
+    <ol className="xzr-list">
+      {filtered.map((item) => (
+        <li key={item.key} className="xzr-item">
+          <button
+            type="button"
+            className="xzr-row"
+            onClick={() => openChannel(item)}
+            aria-label={`打开 ${item.title} 的频道`}
+          >
+            <span className="xzr-star-mark xzr-star-lead">★</span>
+            {item.logo ? (
+              <img className="xzr-logo" src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" />
+            ) : (
+              <span className="xzr-logo xzr-logo-empty" />
+            )}
+            <span className="xzr-main">
+              <span className="xzr-title" title={item.title}>{item.title}</span>
+              <span className="xzr-sub">
+                {item.author || '—'}
+                {item.genre ? <em>· {item.genre}</em> : null}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="xzr-ext xzr-ext-always"
+            onClick={() => onRemove(item.key)}
+            aria-label={`取消收藏 ${item.title}`}
+          >
+            ×
+          </button>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -592,6 +725,14 @@ const STYLES = `
 .xzr-ch-actions{display:flex;align-items:center;gap:8px;flex:none}
 .xzr-ch-search{min-width:170px}
 .xzr-stat-cta b{color:var(--dsw-alias-brand-primary);font-size:12px}
+.xzr-star-mark{display:inline-block;margin-right:6px;padding:0 5px;border-radius:4px;font-size:10.5px;
+  color:#c08a2e;background:rgba(192,138,46,.14)}
+.xzr-star-lead{flex:none;margin:0;font-size:15px;background:transparent;width:18px;text-align:center}
+.xzr-fav{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border-radius:var(--dsw-radius-sm);
+  border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);
+  font-size:12px;cursor:pointer;flex:none;transition:background .15s,color .15s,border-color .15s}
+.xzr-fav:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.xzr-fav.is-on{color:#c08a2e;border-color:rgba(192,138,46,.45);background:rgba(192,138,46,.10)}
 .xzr-done{display:inline-block;margin-right:6px;padding:0 5px;border-radius:4px;font-size:10.5px;
   color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
 .xzr-rank-done{color:var(--dsw-alias-state-business-primary);font-weight:700}

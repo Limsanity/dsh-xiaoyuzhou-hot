@@ -160,6 +160,14 @@ const doneChip = container.querySelector('.xzr-done')
 console.log('done chip:', doneChip?.textContent ?? '(none)')
 if (!doneChip) throw new Error('summarized episode should show the done chip')
 
+// 收藏这个频道
+const favBtn = container.querySelector('.xzr-fav')
+console.log('fav button:', favBtn?.textContent)
+await click(favBtn)
+await tick(400)
+console.log('fav after click:', container.querySelector('.xzr-fav')?.textContent)
+if (!container.querySelector('.xzr-fav')?.textContent?.includes('已收藏')) throw new Error('favorite toggle did not stick')
+
 // 返回榜单
 await click(container.querySelector('.xzr-back'))
 await tick(1200)
@@ -240,4 +248,19 @@ console.log('linked rows after relink:', linkedRows.length)
 if (linkedRows.length < 2) throw new Error('relink did not attach the second entry')
 writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的总结'))
 
-console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html')
+// 我的收藏 tab
+const tabsAll = container.querySelectorAll('.xzr-tab')
+await click(tabsAll[4])
+await tick(600)
+const favRows = container.querySelectorAll('.xzr-row')
+console.log('favorites tab rows:', favRows.length, '| first:', favRows[0]?.querySelector('.xzr-title')?.textContent)
+if (favRows.length !== 1) throw new Error('favorites should list the collected channel')
+writeFileSync(new URL('./preview-favorites.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的收藏'))
+
+// 点收藏行 → 回到该频道
+await click(favRows[0])
+await tick(2500)
+console.log('favorite row -> channel:', container.querySelector('.xzr-ch-title')?.textContent)
+if (!container.querySelector('.xzr-ch-head')) throw new Error('favorite row should open the channel')
+
+console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html / preview-favorites.html')
