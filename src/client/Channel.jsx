@@ -16,7 +16,7 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
   const doneCount = typeof isDone === 'function' ? episodes.filter((ep) => isDone(ep)).length : 0
 
   return (
-    <div className="xzr-root">
+    <div className="xzr-root xzr-channel">
       <header className="xzr-ch-head">
         <button type="button" className="xzr-back" onClick={onBack} title="返回榜单" aria-label="返回榜单">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

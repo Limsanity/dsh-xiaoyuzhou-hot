@@ -136,7 +136,7 @@ const click = async (el) => act(async () => el.dispatchEvent(new window.MouseEve
 await act(async () => root.render(React.createElement(main.comp, mainProps)))
 await tick(2500)
 
-const rows = container.querySelectorAll('.xzr-row')
+const rows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 console.log('list rows:', rows.length)
 if (rows.length < 10) {
   console.log('list state:', container.querySelector('.xzr-state')?.textContent ?? '(none)')
@@ -144,13 +144,16 @@ if (rows.length < 10) {
   throw new Error('expected list rows, got ' + rows.length)
 }
 
-// ---- 5. 播客 → 频道 ----------------------------------------------------------
+// ---- 5. 播客 → 频道(顺带验证:列表不卸载,滚动位置能保住) ---------------------
+const listBody = container.querySelector('.xzr-root:not(.xzr-channel) .xzr-body')
+listBody.scrollTop = 800
+console.log('list scroll before channel:', listBody.scrollTop)
 const firstPodcast = rows[0].querySelector('.xzr-title')?.textContent ?? ''
 await click(rows[0])
 await tick(3000)
 
 const chTitle = container.querySelector('.xzr-ch-title')?.textContent ?? ''
-const chRows = Array.from(container.querySelectorAll('.xzr-row'))
+const chRows = Array.from(container.querySelectorAll('.xzr-channel .xzr-row'))
 console.log('channel:', JSON.stringify(chTitle), '| episodes:', chRows.length, '| opened:', opened.length, '| sessionCalls:', sessionCalls.length)
 if (!chTitle.includes(firstPodcast)) throw new Error(`channel title mismatch: ${chTitle} vs ${firstPodcast}`)
 if (chRows.length < 5) {
@@ -187,10 +190,18 @@ await tick(400)
 console.log('fav after click:', container.querySelector('.xzr-fav')?.textContent)
 if (!container.querySelector('.xzr-fav')?.textContent?.includes('已收藏')) throw new Error('favorite toggle did not stick')
 
+// 打开频道时列表被藏起来(display:none),但节点还在
+const listRootWhileChannel = container.querySelector('.xzr-root:not(.xzr-channel)')
+console.log('list hidden while channel:', listRootWhileChannel?.style.display)
+
 // 返回榜单
 await click(container.querySelector('.xzr-back'))
 await tick(1200)
-const backRows = container.querySelectorAll('.xzr-row')
+const backBody = container.querySelector('.xzr-root:not(.xzr-channel) .xzr-body')
+console.log('list scroll after back:', backBody?.scrollTop, '| same node:', backBody === listBody)
+if (backBody !== listBody) throw new Error('list was unmounted; scroll position would reset')
+if (backBody.scrollTop !== 800) throw new Error(`scroll position lost: ${backBody.scrollTop}`)
+const backRows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 console.log('back -> rows:', backRows.length)
 if (backRows.length < 10) throw new Error('back did not restore the list')
 
@@ -198,7 +209,7 @@ if (backRows.length < 10) throw new Error('back did not restore the list')
 const tabs = container.querySelectorAll('.xzr-tab')
 await click(tabs[2])
 await tick(2500)
-const epRows = container.querySelectorAll('.xzr-row')
+const epRows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 console.log('episode rows:', epRows.length, '|', epRows[0]?.textContent?.replace(/\s+/g, ' ').trim())
 if (epRows.length < 10) throw new Error('expected episode rows')
 
@@ -245,7 +256,7 @@ await tick(600)
 const tabsNow = container.querySelectorAll('.xzr-tab')
 await click(tabsNow[3])
 await tick(800)
-const libRows = container.querySelectorAll('.xzr-row')
+const libRows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 const libTitle = container.querySelector('.xzr-tab.is-active')?.textContent
 console.log('library tab:', libTitle, '| rows:', libRows.length, '| first:', libRows[0]?.querySelector('.xzr-title')?.textContent)
 if (libRows.length === 0) throw new Error('library tab should list the summary we just started')
@@ -262,7 +273,7 @@ if (!relinkBtn) throw new Error('relink button missing')
 await click(relinkBtn)
 await tick(1200)
 console.log('relink note:', container.querySelector('.xzr-note')?.textContent)
-const linkedRows = [...container.querySelectorAll('.xzr-row')].filter((row) => row.textContent.includes('已关联会话'))
+const linkedRows = [...container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')].filter((row) => row.textContent.includes('已关联会话'))
 console.log('linked rows after relink:', linkedRows.length)
 if (linkedRows.length < 2) throw new Error('relink did not attach the second entry')
 writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的总结'))
@@ -271,7 +282,7 @@ writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf()
 const tabsAll = container.querySelectorAll('.xzr-tab')
 await click(tabsAll[4])
 await tick(600)
-const favRows = container.querySelectorAll('.xzr-row')
+const favRows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 console.log('favorites tab rows:', favRows.length, '| first:', favRows[0]?.querySelector('.xzr-title')?.textContent)
 if (favRows.length !== 1) throw new Error('favorites should list the collected channel')
 writeFileSync(new URL('./preview-favorites.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的收藏'))
@@ -297,7 +308,7 @@ await act(async () => {
 })
 await click(container.querySelector('.xzr-search-hero button'))
 await tick(3500)
-const searchRows = container.querySelectorAll('.xzr-row')
+const searchRows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 console.log('search rows:', searchRows.length, '| first:', searchRows[0]?.querySelector('.xzr-title')?.textContent)
 if (searchRows.length === 0) throw new Error('search returned nothing')
 writeFileSync(new URL('./preview-search.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 搜索'))
@@ -305,7 +316,7 @@ writeFileSync(new URL('./preview-search.html', import.meta.url), shell(bodyOf(),
 // 点第一条结果 → 用 appleId 打开频道
 await click(searchRows[0])
 await tick(3000)
-console.log('search -> channel:', container.querySelector('.xzr-ch-title')?.textContent, '| episodes:', container.querySelectorAll('.xzr-row').length)
+console.log('search -> channel:', container.querySelector('.xzr-ch-title')?.textContent, '| episodes:', container.querySelectorAll('.xzr-channel .xzr-row').length)
 if (!container.querySelector('.xzr-ch-head')) throw new Error('search result should open a channel')
 
 // 粘贴小宇宙链接 → resolve 出 pid 再打开

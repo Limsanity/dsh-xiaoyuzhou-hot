@@ -338,30 +338,11 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
 
   const isEpisode = kind === 'episodes'
 
-  if (channel) {
-    return (
-      <>
-        <style>{STYLES}</style>
-        <ChannelView
-          podcast={channel.podcast}
-          data={channel.data}
-          loading={channel.loading}
-          error={channel.error}
-          onBack={closeChannel}
-          onRetry={() => openChannel(channel.podcast)}
-          summarize={summarizeEpisode}
-          openExternal={open}
-          isDone={(ep) => libraryIndex.has(ep)}
-          isFavorite={favoriteIndex.has(favoriteKey(channel.podcast))}
-          onToggleFavorite={toggleFavorite}
-        />
-      </>
-    )
-  }
-
+  // 列表(channel 打开时用 display:none 藏着)不卸载,这样返回时滚动位置还在
   return (
-    <div className="xzr-root">
+    <>
       <style>{STYLES}</style>
+      <div className="xzr-root" style={channel ? { display: 'none' } : undefined}>
 
       <header className="xzr-header">
         <div className="xzr-headrow">
@@ -628,7 +609,24 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           <span>{fetchedAt ? `更新于 ${formatClock(fetchedAt)}` : '—'}</span>
         )}
       </footer>
-    </div>
+      </div>
+
+      {channel ? (
+        <ChannelView
+          podcast={channel.podcast}
+          data={channel.data}
+          loading={channel.loading}
+          error={channel.error}
+          onBack={closeChannel}
+          onRetry={() => openChannel(channel.podcast)}
+          summarize={summarizeEpisode}
+          openExternal={open}
+          isDone={(ep) => libraryIndex.has(ep)}
+          isFavorite={favoriteIndex.has(favoriteKey(channel.podcast))}
+          onToggleFavorite={toggleFavorite}
+        />
+      ) : null}
+    </>
   )
 }
 
