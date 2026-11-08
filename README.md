@@ -43,6 +43,20 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 - 6 秒内没等到就放弃(比如 DSH 复用了空白会话,不会新建);
 - 有 `sessionId` 的行:点击 → `uiWorkspace.openSession(id)` 跳回那次对话,右侧另有 ↗ 去小宇宙;没有的行点击仍然是打开小宇宙。
 
+### 记录丢了/没关联会话怎么补救
+
+```bash
+node scripts/relink-sessions.mjs --dry-run   # 只匹配,不改库
+node scripts/relink-sessions.mjs             # 回写 sessionId
+```
+
+它扫 `$DSH_HOME/sessions/*/session-*/session.v4.jsonl.zstd`,找以「总结《播客》单集标题」开头的用户消息,按标题和 `library.json` 对齐后调用 `POST /x-hot/library` 补 `sessionId`。
+
+两个坑写在这里免得再踩:
+
+- 会话文件是**多段 zstd 拼接**,Node 的 `zstdDecompressSync` 只解第一段(约 200 字节),必须用 `zstd -dc`;
+- 会话里的中文是 `\uXXXX` 转义,**不能直接对原文 grep 中文**,要逐行 `JSON.parse`。
+
 ### 路由
 
 | 路由 | 说明 |
