@@ -598,7 +598,9 @@ const STYLES = `
 .xzr-logo-empty{display:inline-block}
 .xzr-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .xzr-title{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  /* 只让"文字本身"接收 hover:否则整行宽都是 tooltip 触发区,气泡会盖住右侧图标 */
+  align-self:flex-start;max-width:100%}
 .xzr-sub{font-size:11.5px;color:var(--dsw-alias-label-tertiary);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .xzr-sub em{font-style:normal;margin-left:4px;color:var(--dsw-alias-label-caption)}
