@@ -12,9 +12,10 @@
  *   GET /x-hot/channel?id=<小宇宙播客 id>&apple=<Apple Podcasts id>
  *   GET /x-hot/health
  */
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { zstdDecompressSync } from 'node:zlib'
 
 export const name = 'xiaoyuzhou-hot'
 
@@ -38,6 +39,8 @@ const MAX_EPISODES = 300
 const MAX_LIBRARY = 2000
 const LIBRARY_DIR = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'xiaoyuzhou-hot')
 const LIBRARY_FILE = join(LIBRARY_DIR, 'library.json')
+const SESSION_ROOT = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'sessions')
+const SESSION_SCAN_LIMIT = 400
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
 
@@ -348,6 +351,122 @@ class Library {
   }
 }
 
+// --------------------------------------------------------- 会话关联(补救) ---
+
+const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd]
+
+/**
+ * DSH 的会话文件是多段 zstd 拼接,node:zlib 的 zstdDecompressSync 只解第一段。
+ * 这里按魔数把帧切开逐段解(实测 70 帧、0 失败),不依赖外部的 zstd 命令。
+ */
+function decodeSessionFile(buffer) {
+  const starts = [0]
+  for (let i = 4; i < buffer.length - 3; i += 1) {
+    if (
+      buffer[i] === ZSTD_MAGIC[0] &&
+      buffer[i + 1] === ZSTD_MAGIC[1] &&
+      buffer[i + 2] === ZSTD_MAGIC[2] &&
+      buffer[i + 3] === ZSTD_MAGIC[3]
+    ) {
+      starts.push(i)
+    }
+  }
+  let text = ''
+  for (let k = 0; k < starts.length; k += 1) {
+    const end = k + 1 < starts.length ? starts[k + 1] : buffer.length
+    try {
+      text += zstdDecompressSync(buffer.subarray(starts[k], end)).toString('utf8')
+    } catch {
+      // 某一帧坏了就跳过,不影响其它帧
+    }
+  }
+  return text
+}
+
+/** 从会话里找出「总结《播客》单集标题」那条用户消息 */
+function summaryPromptOf(text) {
+  for (const line of text.split('\n')) {
+    if (!line.includes('"user/message"')) continue
+    let event
+    try {
+      event = JSON.parse(line)
+    } catch {
+      continue
+    }
+    for (const part of event?.data?.content ?? []) {
+      const value = part?.text
+      if (typeof value !== 'string' || !value.startsWith('总结《')) continue
+      const match = /^总结《(.+?)》([^\n]+)/.exec(value)
+      if (match) return { podcast: match[1], title: match[2].trim() }
+    }
+  }
+  return undefined
+}
+
+const normalizeTitle = (value) => String(value ?? '').replace(/\s+/g, '')
+
+async function listSessionFiles(root, limit) {
+  const files = []
+  let workspaces = []
+  try {
+    workspaces = await readdir(root)
+  } catch {
+    return files
+  }
+  for (const workspace of workspaces) {
+    const dir = join(root, workspace)
+    let entries = []
+    try {
+      if (!(await stat(dir)).isDirectory()) continue
+      entries = await readdir(dir)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.startsWith('session-')) continue
+      const file = join(dir, entry, 'session.v4.jsonl.zstd')
+      try {
+        if (!(await stat(file)).isFile()) continue
+      } catch {
+        continue
+      }
+      files.push({ sessionId: entry.slice('session-'.length), file })
+      if (files.length >= limit) return files
+    }
+  }
+  return files
+}
+
+/**
+ * 按标题把已读记录和会话对齐:记录文件丢过、或当时没抓到 sessionId 时用它补。
+ * @returns 扫描/命中/新关联的数量
+ */
+async function relinkSessions(library, log) {
+  const items = await library.list()
+  const byTitle = new Map(items.filter((item) => item?.title).map((item) => [normalizeTitle(item.title), item]))
+  let scanned = 0
+  let matched = 0
+  let linked = 0
+  for (const { sessionId, file } of await listSessionFiles(SESSION_ROOT, SESSION_SCAN_LIMIT)) {
+    let prompt
+    try {
+      prompt = summaryPromptOf(decodeSessionFile(await readFile(file)))
+    } catch (error) {
+      log?.warn?.(`xiaoyuzhou-hot: 读取会话失败 ${file} (${error?.message ?? error})`)
+      continue
+    }
+    if (!prompt) continue
+    scanned += 1
+    const item = byTitle.get(normalizeTitle(prompt.title))
+    if (!item) continue
+    matched += 1
+    if (item.sessionId === sessionId) continue
+    await library.mark({ key: item.key, sessionId })
+    linked += 1
+  }
+  return { scanned, matched, linked }
+}
+
 // ------------------------------------------------------------------- 插件 ---
 
 export function apply(ctx, config = {}) {
@@ -518,6 +637,24 @@ export function apply(ctx, config = {}) {
   disposers.push(
     ctx.webServer.register({
       kind: 'exact',
+      path: '/x-hot/library/relink',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        try {
+          const result = await relinkSessions(library, log)
+          const items = await library.list()
+          return sendJson(res, 200, { ok: true, ...result, items })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: relink ${error?.stack ?? error}`)
+          return sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
       path: '/x-hot/health',
       handler: (req, res) => sendJson(res, 200, { ok: true, plugin: 'xiaoyuzhou-hot', upstream: UPSTREAM }),
     }),
@@ -539,5 +676,5 @@ export function apply(ctx, config = {}) {
     }
   }, 'xiaoyuzhou-hot: unregister routes')
 
-  log.info?.('xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/library, /x-hot/health registered')
+  log.info?.('xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/library(+relink), /x-hot/health registered')
 }

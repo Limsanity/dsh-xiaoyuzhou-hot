@@ -9,7 +9,8 @@
  *  6. 导出 preview.html / preview-episodes.html / preview-channel.html
  */
 import { createRequire } from 'node:module'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { zstdCompressSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -19,6 +20,15 @@ const require = createRequire(import.meta.url)
 
 // 测试绝不能碰真实记录:宿主按 DSH_HOME 落盘,这里换到临时目录
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'xzr-client-test-'))
+const RELINK_SESSION = 'feed0000-1111-4222-8333-444444444444'
+{
+  // 一个"当时没抓到 id"的总结会话,正文只用于标题匹配
+  const prompt = '总结《三个火呛手》Vol.163 人生是一片旷野 方向就是前进\n\n播客：三个火呛手\n'
+  const line = JSON.stringify({ type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: prompt }] } })
+  const dir = join(process.env.DSH_HOME, 'sessions', '--tmp--', `session-${RELINK_SESSION}`)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(line + '\n')))
+}
 
 // ---- 0. jsdom 必须先建:bundle 加载时就把 window 捕获了 ----------------------
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
@@ -83,7 +93,9 @@ const libraryPosts = []
 globalThis.fetch = async (url, init = {}) => {
   const raw = String(url)
   if (/^https?:\/\//.test(raw)) return realFetch(raw, init)
-  const route = routes.find((r) => raw.startsWith(r.path))
+  // 精确匹配:宿主的路由都是 exact,用 startsWith 会让 /x-hot/library 抢走 /x-hot/library/relink
+  const pathname = raw.split('?')[0]
+  const route = routes.find((r) => r.path === pathname)
   if (!route) return new Response(JSON.stringify({ ok: false, error: 'no route ' + raw }), { status: 404 })
   if ((init.method ?? 'GET') === 'POST') libraryPosts.push(JSON.parse(init.body ?? '{}'))
   const req = {
@@ -217,6 +229,15 @@ if (!linkedRow) throw new Error('no linked row found')
 await click(linkedRow)
 console.log('library row click -> sessions opened:', JSON.stringify(openedSessions), '| external opens:', opened.length)
 if (openedSessions.at(-1) !== 'sum-1') throw new Error('clicking a linked row should open its session')
+console.log('link chips before relink:', container.querySelectorAll('.xzr-ch-done').length)
+const relinkBtn = container.querySelector('.xzr-linkbtn')
+if (!relinkBtn) throw new Error('relink button missing')
+await click(relinkBtn)
+await tick(1200)
+console.log('relink note:', container.querySelector('.xzr-note')?.textContent)
+const linkedRows = [...container.querySelectorAll('.xzr-row')].filter((row) => row.textContent.includes('已关联会话'))
+console.log('linked rows after relink:', linkedRows.length)
+if (linkedRows.length < 2) throw new Error('relink did not attach the second entry')
 writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的总结'))
 
 console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html')

@@ -51,6 +51,8 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   const [query, setQuery] = useState('')
   const [channel, setChannel] = useState(null)
   const [library, setLibrary] = useState([])
+  const [relinking, setRelinking] = useState(false)
+  const [relinkNote, setRelinkNote] = useState('')
   const ctrl = useRef(null)
   const channelCtrl = useRef(null)
 
@@ -212,6 +214,22 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ key, sessionId }),
     }).catch(() => {})
+  }, [])
+
+  const relinkSessions = useCallback(async () => {
+    setRelinking(true)
+    setRelinkNote('')
+    try {
+      const res = await fetch('/x-hot/library/relink', { method: 'POST' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      setLibrary(data.items ?? [])
+      setRelinkNote(data.matched === 0 ? '没有可对的会话' : `匹配 ${data.matched} · 新关联 ${data.linked}`)
+    } catch (error) {
+      setRelinkNote(String(error?.message ?? error))
+    } finally {
+      setRelinking(false)
+    }
   }, [])
 
   const removeSummarized = useCallback((key) => {
@@ -405,7 +423,16 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           {kind !== 'library' && total > items.length ? ` · 共 ${total} 档上榜` : ''}
           {kind !== 'library' && isEpisode ? ' · 点单集新开会话总结' : ''}
         </span>
-        <span>{fetchedAt ? `更新于 ${formatClock(fetchedAt)}` : '—'}</span>
+        {kind === 'library' ? (
+          <span className="xzr-foot-actions">
+            {relinkNote ? <span className="xzr-note">{relinkNote}</span> : null}
+            <button type="button" className="xzr-linkbtn" onClick={relinkSessions} disabled={relinking}>
+              {relinking ? '扫描中…' : '重新关联会话'}
+            </button>
+          </span>
+        ) : (
+          <span>{fetchedAt ? `更新于 ${formatClock(fetchedAt)}` : '—'}</span>
+        )}
       </footer>
     </div>
   )
@@ -623,6 +650,12 @@ const STYLES = `
 .xzr-skel-lines{flex:1;display:flex;flex-direction:column;gap:7px}
 .xzr-skel-lines span{height:11px}
 @keyframes xzr-pulse{0%,100%{opacity:.55}50%{opacity:.95}}
+.xzr-foot-actions{display:inline-flex;align-items:center;gap:10px}
+.xzr-note{color:var(--dsw-alias-label-caption)}
+.xzr-linkbtn{border:0;background:transparent;color:var(--dsw-alias-brand-primary);font-size:11px;
+  cursor:pointer;padding:2px 4px;border-radius:4px}
+.xzr-linkbtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.xzr-linkbtn:disabled{color:var(--dsw-alias-label-caption);cursor:default}
 .xzr-foot{flex:none;display:flex;align-items:center;justify-content:space-between;padding:7px max(24px,calc((100% - 1040px)/2));
   border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-caption)}
 @media (max-width:720px){.xzr-header{padding:14px 14px 8px}.xzr-stats{display:none}.xzr-foot{padding:7px 14px}}

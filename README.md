@@ -45,10 +45,16 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 
 ### 记录丢了/没关联会话怎么补救
 
+面板里:`我的总结` → 右下角 **重新关联会话** 按钮,点完给一行反馈(`匹配 N · 新关联 M`)。
+
+命令行也行(离线可用,不需要 dsh 在跑):
+
 ```bash
 node scripts/relink-sessions.mjs --dry-run   # 只匹配,不改库
-node scripts/relink-sessions.mjs             # 回写 sessionId
+node scripts/relink-sessions.mjs             # 回写 sessionId(走插件接口)
 ```
+
+接口:`POST /x-hot/library/relink` → `{ scanned, matched, linked, items }`。
 
 它扫 `$DSH_HOME/sessions/*/session-*/session.v4.jsonl.zstd`,找以「总结《播客》单集标题」开头的用户消息,按标题和 `library.json` 对齐后调用 `POST /x-hot/library` 补 `sessionId`。
 
