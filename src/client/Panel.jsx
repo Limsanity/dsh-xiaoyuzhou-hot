@@ -351,12 +351,12 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
                   type="button"
                   className="xzr-row"
                   onClick={() => (isEpisode ? summarizeEpisode(item) : openChannel(item))}
-                  title={isEpisode ? `新开 DSH 会话总结:${item.title}` : `看 ${item.title} 的分集列表`}
+                  aria-label={isEpisode ? `新开 DSH 会话总结:${item.title}` : `看 ${item.title} 的分集列表`}
                 >
                   <span className={`xzr-rank${item.rank <= 3 ? ` is-top is-${item.rank}` : ''}`}>{item.rank}</span>
                   {item.logo ? <img className="xzr-logo" src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="xzr-logo xzr-logo-empty" />}
                   <span className="xzr-main">
-                    <span className="xzr-title">{item.title}</span>
+                    <span className="xzr-title" title={item.title}>{item.title}</span>
                     <span className="xzr-sub">
                       {libraryIndex.has(keyOf(item)) ? <span className="xzr-done">✓ 已总结</span> : null}
                       {item.author || '—'}
@@ -380,7 +380,6 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
                     type="button"
                     className="xzr-ext"
                     onClick={() => open(item.url)}
-                    title="在小宇宙打开这一集"
                     aria-label="在小宇宙打开这一集"
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -451,11 +450,11 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
               if (item.sessionId && typeof openSession === 'function' && openSession(item.sessionId)) return
               openExternal(item.url)
             }}
-            title={item.sessionId ? '打开那次总结会话' : item.url || '暂无链接'}
+            aria-label={item.sessionId ? `打开那次总结会话:${item.title}` : `在小宇宙打开:${item.title}`}
           >
             <span className="xzr-rank xzr-rank-done">✓</span>
             <span className="xzr-main">
-              <span className="xzr-title">{item.title}</span>
+              <span className="xzr-title" title={item.title}>{item.title}</span>
               <span className="xzr-sub">
                 {item.podcast || '—'}
                 <em>· {formatWhen(item.at)}</em>
@@ -474,7 +473,6 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
               type="button"
               className="xzr-ext xzr-ext-left"
               onClick={() => openExternal(item.url)}
-              title="在小宇宙打开这一集"
               aria-label="在小宇宙打开这一集"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -488,8 +486,7 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
             type="button"
             className="xzr-ext xzr-ext-always"
             onClick={() => onRemove(item.key)}
-            title="取消标记(下次还能重新总结)"
-            aria-label="取消标记"
+            aria-label={`取消标记:${item.title}`}
           >
             ×
           </button>

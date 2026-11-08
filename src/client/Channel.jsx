@@ -86,11 +86,11 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
                   type="button"
                   className="xzr-row"
                   onClick={() => summarize({ ...ep, author: podcast?.title ?? data?.title ?? '' }, podcast)}
-                  title={`新开 DSH 会话总结:${ep.title}`}
+                  aria-label={`新开 DSH 会话总结:${ep.title}`}
                 >
                   <span className="xzr-rank">{index + 1}</span>
                   <span className="xzr-main">
-                    <span className="xzr-title">{ep.title}</span>
+                    <span className="xzr-title" title={ep.title}>{ep.title}</span>
                     <span className="xzr-sub">
                       {typeof isDone === 'function' && isDone(ep) ? <span className="xzr-done">✓ 已总结</span> : null}
                       {formatDay(ep.pubDate) || '—'}
@@ -109,7 +109,6 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
                     type="button"
                     className="xzr-ext"
                     onClick={() => openExternal(ep.url)}
-                    title="在小宇宙打开这一集"
                     aria-label="在小宇宙打开这一集"
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
