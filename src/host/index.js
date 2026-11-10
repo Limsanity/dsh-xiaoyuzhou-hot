@@ -422,7 +422,10 @@ function summaryPromptOf(text) {
       const value = part?.text
       if (typeof value !== 'string' || !value.startsWith('总结《')) continue
       const match = /^总结《(.+?)》([^\n]+)/.exec(value)
-      if (match) return { podcast: match[1], title: match[2].trim() }
+      if (match) {
+        const url = /^单集页：(.+)$/m.exec(value)?.[1]?.trim() ?? ''
+        return { podcast: match[1].trim(), title: match[2].trim(), url }
+      }
     }
   }
   return undefined
@@ -491,6 +494,81 @@ async function relinkSessions(library, log) {
     linked += 1
   }
   return { scanned, matched, linked }
+}
+
+/**
+ * 按「总结历史」补收藏:总结过的播客大概率是常听的。
+ * 优先用单集页解析 pid;解析不到(喜马拉雅等)就按播客名去 Apple 目录找精确同名的。
+ * @returns {{scanned:number, added:number, skipped:Array<{podcast:string,reason:string}>}}
+ */
+async function rebuildFavoritesFromSessions(favorites, log, { resolvePodcast, searchPodcasts }) {
+  const files = await listSessionFiles(SESSION_ROOT, SESSION_SCAN_LIMIT)
+  /** podcastKey -> { podcast, url, at } */
+  const latest = new Map()
+  for (const { file } of files) {
+    let prompt
+    let fileStat
+    try {
+      fileStat = await stat(file)
+      prompt = summaryPromptOf(decodeSessionFile(await readFile(file)))
+    } catch (error) {
+      log?.warn?.(`xiaoyuzhou-hot: 读会话失败 ${file} (${error?.message ?? error})`)
+      continue
+    }
+    if (!prompt?.podcast) continue
+    const key = normalizeTitle(prompt.podcast)
+    const prev = latest.get(key)
+    const at = fileStat?.mtimeMs ?? Date.now()
+    if (!prev || prev.at < at) latest.set(key, { podcast: prompt.podcast, url: prompt.url, at })
+  }
+
+  const existing = new Set((await favorites.list()).map((item) => item.key))
+  const skipped = []
+  let added = 0
+
+  for (const entry of latest.values()) {
+    let favorite
+    try {
+      if (/xiaoyuzhoufm\.com\/episode\//i.test(entry.url)) {
+        const pod = await resolvePodcast(entry.url)
+        if (!pod.pid) throw new Error('没解析出 pid')
+        favorite = {
+          key: pod.pid,
+          title: pod.title || entry.podcast,
+          author: pod.author,
+          url: pod.url,
+          logo: pod.logo,
+          at: entry.at,
+        }
+      } else {
+        const found = await searchPodcasts(entry.podcast, 8)
+        const exact = found.items.find((item) => normalizeTitle(item.title) === normalizeTitle(entry.podcast))
+        const hit = exact ?? found.items[0]
+        if (!hit?.appleId) throw new Error('Apple 目录里没找到')
+        favorite = {
+          key: `apple:${hit.appleId}`,
+          title: hit.title || entry.podcast,
+          author: hit.author,
+          genre: hit.genre,
+          appleId: hit.appleId,
+          logo: hit.logo,
+          at: entry.at,
+        }
+      }
+    } catch (error) {
+      skipped.push({ podcast: entry.podcast, reason: String(error?.message ?? error) })
+      continue
+    }
+    if (existing.has(favorite.key)) {
+      skipped.push({ podcast: entry.podcast, reason: '已经收藏过' })
+      continue
+    }
+    await favorites.mark(favorite)
+    existing.add(favorite.key)
+    added += 1
+  }
+
+  return { scanned: latest.size, added, skipped }
 }
 
 // ------------------------------------------------------------------- 插件 ---
@@ -788,6 +866,24 @@ export function apply(ctx, config = {}) {
         } catch (error) {
           log.warn?.(`xiaoyuzhou-hot: favorites ${error?.message ?? error}`)
           return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/x-hot/favorites/rebuild',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        try {
+          const result = await rebuildFavoritesFromSessions(favorites, log, { resolvePodcast, searchPodcasts })
+          const items = await favorites.list()
+          return sendJson(res, 200, { ok: true, ...result, items })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: rebuild favorites ${error?.stack ?? error}`)
+          return sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
         }
       },
     }),

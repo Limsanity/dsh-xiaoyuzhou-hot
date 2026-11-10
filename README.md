@@ -88,7 +88,9 @@ node scripts/rebuild-library.mjs --dry-run   # 先看能扫出哪些
 node scripts/rebuild-library.mjs             # 写回(会话 id 一起带上)
 ```
 
-它扫所有会话里以「总结《播客》单集标题」开头的用户消息,抽 `播客/单集页/音频直链`,按单集 id 归并后写回。收藏没这个来源,删了只能重新点星。
+它扫所有会话里以「总结《播客》单集标题」开头的用户消息,抽 `播客/单集页/音频直链`,按单集 id 归并后写回。
+
+收藏也能从同一份历史里推:面板里点 `按总结补收藏`(等价 `POST /x-hot/favorites/rebuild`)。单集页是小宇宙链接的能直接解析出 pid;喜马拉雅等来源的按播客名去 Apple 目录找同名条目。推出来的收藏可能混进你其实不想收的,`×` 掉即可。
 
 它扫 `$DSH_HOME/sessions/*/session-*/session.v4.jsonl.zstd`,找以「总结《播客》单集标题」开头的用户消息,按标题和 `library.json` 对齐后调用 `POST /x-hot/library` 补 `sessionId`。
 
@@ -117,7 +119,8 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 
 - 频道页右上角 `☆ 收藏` / `★ 已收藏` 切换;
 - 榜单里的播客行会带一个小小的 `★ 收藏` 标记,一眼看出哪些已经收过;
-- `我的收藏` tab:点行 → 原地进频道;`×` → 取消收藏;支持关键词过滤。
+- `我的收藏` tab:点行 → 原地进频道;`×` → 取消收藏;支持关键词过滤;
+- 页脚 `按总结补收藏`:扫总结会话里出现过的播客,自动补进来(小宇宙单集页能解析出 pid 的用 pid,其余按播客名去 Apple 目录找同名)——适合"记录文件被清过、懒得一个个重收"的场景。
 
 ### 路由
 
@@ -126,6 +129,7 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | `GET /x-hot/favorites` | 收藏列表(按收藏时间倒序) |
 | `POST /x-hot/favorites` | 收藏(JSON: `key/title/author/genre/url/appleId/logo`) |
 | `DELETE /x-hot/favorites?id=<播客 id>` | 取消收藏 |
+| `POST /x-hot/favorites/rebuild` | 按总结历史补收藏 → `{scanned, added, skipped, items}` |
 
 ## 找榜单外的播客
 

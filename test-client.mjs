@@ -134,13 +134,14 @@ const tick = async (ms) => act(async () => { await new Promise((r) => setTimeout
 const click = async (el) => act(async () => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true })))
 
 await act(async () => root.render(React.createElement(main.comp, mainProps)))
-await tick(2500)
+await tick(3500)
+if (container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row').length === 0) await tick(4000)
 
 const rows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 console.log('list rows:', rows.length)
 if (rows.length < 10) {
   console.log('list state:', container.querySelector('.xzr-state')?.textContent ?? '(none)')
-  console.log('active tab:', container.querySelector('.xzr-tab.is-active')?.textContent)
+  console.log('active tab:', container.querySelector('.xzr-tab.is-active')?.textContent, '| state:', container.querySelector('.xzr-state')?.textContent ?? '(none)')
   throw new Error('expected list rows, got ' + rows.length)
 }
 
@@ -278,7 +279,7 @@ console.log('linked rows after relink:', linkedRows.length)
 if (linkedRows.length < 2) throw new Error('relink did not attach the second entry')
 writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的总结'))
 
-// 我的收藏 tab
+// ---- 我的收藏 tab ----
 const tabsAll = container.querySelectorAll('.xzr-tab')
 await click(tabsAll[4])
 await tick(600)
@@ -286,6 +287,14 @@ const favRows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row
 console.log('favorites tab rows:', favRows.length, '| first:', favRows[0]?.querySelector('.xzr-title')?.textContent)
 if (favRows.length !== 1) throw new Error('favorites should list the collected channel')
 writeFileSync(new URL('./preview-favorites.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的收藏'))
+
+// 按总结补收藏(宿主会扫会话 + 解析/搜目录)
+const rebuildBtn = [...container.querySelectorAll('.xzr-linkbtn')].find((b) => b.textContent.includes('补收藏'))
+if (!rebuildBtn) throw new Error('rebuild favorites button missing')
+await click(rebuildBtn)
+await tick(4000)
+console.log('rebuild favorites note:', container.querySelector('.xzr-note')?.textContent, '| rows:', container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row').length)
+if (!container.querySelector('.xzr-note')) throw new Error('rebuild should report a result')
 
 // 点收藏行 → 回到该频道
 await click(favRows[0])

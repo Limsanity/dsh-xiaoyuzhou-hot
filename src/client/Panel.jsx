@@ -67,6 +67,8 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   const [searchTouched, setSearchTouched] = useState(false)
   const [relinking, setRelinking] = useState(false)
   const [relinkNote, setRelinkNote] = useState('')
+  const [rebuildingFavs, setRebuildingFavs] = useState(false)
+  const [favNote, setFavNote] = useState('')
   const ctrl = useRef(null)
   const channelCtrl = useRef(null)
 
@@ -314,6 +316,22 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       setRelinkNote(String(error?.message ?? error))
     } finally {
       setRelinking(false)
+    }
+  }, [])
+
+  const rebuildFavorites = useCallback(async () => {
+    setRebuildingFavs(true)
+    setFavNote('')
+    try {
+      const res = await fetch('/x-hot/favorites/rebuild', { method: 'POST' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      setFavorites(data.items ?? [])
+      setFavNote(data.added === 0 ? '没有新的可补(都收过了)' : `新增 ${data.added} 个`)
+    } catch (error) {
+      setFavNote(String(error?.message ?? error))
+    } finally {
+      setRebuildingFavs(false)
     }
   }, [])
 
@@ -598,12 +616,23 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           {kind !== 'library' && total > items.length ? ` · 共 ${total} 档上榜` : ''}
           {kind !== 'library' && isEpisode ? ' · 点单集新开会话总结' : ''}
         </span>
-        {kind === 'library' ? (
+        {kind === 'library' || kind === 'favorites' ? (
           <span className="xzr-foot-actions">
-            {relinkNote ? <span className="xzr-note">{relinkNote}</span> : null}
-            <button type="button" className="xzr-linkbtn" onClick={relinkSessions} disabled={relinking}>
-              {relinking ? '扫描中…' : '重新关联会话'}
-            </button>
+            {kind === 'library' ? (
+              <>
+                {relinkNote ? <span className="xzr-note">{relinkNote}</span> : null}
+                <button type="button" className="xzr-linkbtn" onClick={relinkSessions} disabled={relinking}>
+                  {relinking ? '扫描中…' : '重新关联会话'}
+                </button>
+              </>
+            ) : (
+              <>
+                {favNote ? <span className="xzr-note">{favNote}</span> : null}
+                <button type="button" className="xzr-linkbtn" onClick={rebuildFavorites} disabled={rebuildingFavs}>
+                  {rebuildingFavs ? '扫描中…' : '按总结补收藏'}
+                </button>
+              </>
+            )}
           </span>
         ) : (
           <span>{fetchedAt ? `更新于 ${formatClock(fetchedAt)}` : '—'}</span>
