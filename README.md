@@ -145,10 +145,23 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 
 区别记一下:关键词搜出来的频道只有 `appleId`,频道里没有「在小宇宙 ↗」按钮;想要那个按钮就用粘链接的方式(链接里能解析出 `pid`)。
 
+### 图片反代(远程访问用)
+
+封面来自 `image.xyzcdn.net`(小宇宙)、`is1-ssl.mzstatic.com`(Apple)、`xmcdn.com`(喜马拉雅)。
+本地用没问题,但经 Tailscale / 内网从别的设备访问时,那些 CDN 往往直连不到 → 图全裂。
+
+所以客户端不再直连 CDN,而是走宿主的 `/x-hot/img?url=…`:宿主(能上网)抓回来再发给浏览器,
+浏览器只需要能连通 DSH 本身。
+
+- 白名单:`*.xyzcdn.net`、`*.mzstatic.com`、`*.xmcdn.com`、`*.xiaoyuzhoufm.com`(其余 400,挡 SSRF);
+- 只接受 `image/*`、单张上限 6MB;宿主内存缓存 120 张 / 24h,响应带 `max-age=86400`;
+- 客户端加载失败会自动回落到原始 URL(所以宿主没重启、路由还不存在时图也不会消失)。
+
 ### 路由
 
 | 路由 | 说明 |
 |---|---|
+| `GET /x-hot/img?url=<编码后的图片地址>` | 图片反代(白名单内) |
 | `GET /x-hot/search?q=<关键词>&limit=1..50` | Apple 播客目录搜索(中国区) |
 | `GET /x-hot/resolve?url=<小宇宙链接或 24 位 id>` | 解析出 `{pid,title,author,episodes,logo,url}` |
 

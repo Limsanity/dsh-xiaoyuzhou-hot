@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChannelView } from './Channel.jsx'
 import { formatClock, formatCount, formatRate, formatWhen } from './format.js'
 import { createLibraryIndex, keyOf } from './library-index.js'
+import { RemoteImage } from './RemoteImage.jsx'
 
 const TABS = [
   { key: 'podcasts', label: '热门播客' },
@@ -524,7 +525,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
                       aria-label={`打开 ${item.title} 的频道`}
                     >
                       {item.logo ? (
-                        <img className="xzr-logo" src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                        <RemoteImage className="xzr-logo" src={item.logo} />
                       ) : (
                         <span className="xzr-logo xzr-logo-empty" />
                       )}
@@ -610,7 +611,7 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
                   aria-label={isEpisode ? `新开 DSH 会话总结:${item.title}` : `看 ${item.title} 的分集列表`}
                 >
                   <span className={`xzr-rank${item.rank <= 3 ? ` is-top is-${item.rank}` : ''}`}>{item.rank}</span>
-                  {item.logo ? <img className="xzr-logo" src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="xzr-logo xzr-logo-empty" />}
+                  {item.logo ? <RemoteImage className="xzr-logo" src={item.logo} /> : <span className="xzr-logo xzr-logo-empty" />}
                   <span className="xzr-main">
                     <span className="xzr-title" title={item.title}>{item.title}</span>
                     <span className="xzr-sub">
@@ -751,7 +752,7 @@ function FavoritesList({ items, query, openChannel, openExternal, onRemove }) {
           >
             <span className="xzr-star-mark xzr-star-lead">★</span>
             {item.logo ? (
-              <img className="xzr-logo" src={item.logo} alt="" loading="lazy" referrerPolicy="no-referrer" />
+              <RemoteImage className="xzr-logo" src={item.logo} />
             ) : (
               <span className="xzr-logo xzr-logo-empty" />
             )}

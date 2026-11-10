@@ -61,6 +61,14 @@ const FAVORITE_ITEM_FIELDS = [
 ]
 const SESSION_ROOT = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'sessions')
 const SESSION_SCAN_LIMIT = 400
+/**
+ * 图片反代:浏览器经 Tailscale 访问时,第三方 CDN(Apple/喜马拉雅/小宇宙)常常
+ * 直连不到或很慢;由宿主把它们抓回来再发给浏览器,只需要能连通 DSH 本身。
+ */
+const IMAGE_HOST_SUFFIXES = ['xyzcdn.net', 'mzstatic.com', 'xmcdn.com', 'xiaoyuzhoufm.com']
+const IMAGE_TTL_MS = 24 * 60 * 60 * 1000
+const IMAGE_MAX_BYTES = 6 * 1024 * 1024
+const IMAGE_MAX_ENTRIES = 120
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
 
@@ -88,6 +96,17 @@ async function fetchText(url, timeoutMs = TIMEOUT_MS) {
   })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
   return res.text()
+}
+
+function isAllowedImageUrl(raw) {
+  let url
+  try {
+    url = new URL(String(raw ?? ''))
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
+  return IMAGE_HOST_SUFFIXES.some((suffix) => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`))
 }
 
 function xyzLink(item) {
@@ -871,6 +890,63 @@ export function apply(ctx, config = {}) {
     }),
   )
 
+  /** 图片缓存:url -> { at, type, body } */
+  const imageCache = new Map()
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/x-hot/img',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
+          return res.end('method not allowed')
+        }
+        const url = new URL(req.url ?? '/x-hot/img', 'http://localhost')
+        const target = url.searchParams.get('url') ?? ''
+        if (!isAllowedImageUrl(target)) {
+          res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+          return res.end('unsupported image url')
+        }
+
+        const hit = imageCache.get(target)
+        if (hit && Date.now() - hit.at < IMAGE_TTL_MS) {
+          res.writeHead(200, {
+            'content-type': hit.type,
+            'cache-control': 'public, max-age=86400',
+            'content-length': hit.body.length,
+          })
+          return res.end(hit.body)
+        }
+
+        try {
+          const upstream = await fetch(target, {
+            headers: { 'user-agent': UA, accept: 'image/*' },
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+            redirect: 'follow',
+          })
+          if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`)
+          const type = upstream.headers.get('content-type') ?? ''
+          if (!type.startsWith('image/')) throw new Error(`不是图片: ${type || 'unknown'}`)
+          const body = Buffer.from(await upstream.arrayBuffer())
+          if (body.length > IMAGE_MAX_BYTES) throw new Error('图片太大')
+          imageCache.set(target, { at: Date.now(), type, body })
+          while (imageCache.size > IMAGE_MAX_ENTRIES) imageCache.delete(imageCache.keys().next().value)
+          res.writeHead(200, {
+            'content-type': type,
+            'cache-control': 'public, max-age=86400',
+            'content-length': body.length,
+          })
+          return res.end(body)
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: 图片反代失败 ${target} (${error?.message ?? error})`)
+          res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+          return res.end('image fetch failed')
+        }
+      },
+    }),
+  )
+
   disposers.push(
     ctx.webServer.register({
       kind: 'exact',
@@ -1003,6 +1079,6 @@ export function apply(ctx, config = {}) {
   }, 'xiaoyuzhou-hot: unregister routes')
 
   log.info?.(
-    'xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/search, /x-hot/resolve, /x-hot/library(+relink), /x-hot/favorites, /x-hot/health registered',
+    'xiaoyuzhou-hot: routes /x-hot/list, /x-hot/channel, /x-hot/search, /x-hot/resolve, /x-hot/img, /x-hot/library(+relink), /x-hot/favorites, /x-hot/health registered',
   )
 }

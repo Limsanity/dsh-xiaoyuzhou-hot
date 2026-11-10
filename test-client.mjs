@@ -139,6 +139,10 @@ if (container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row').length ==
 
 const rows = container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')
 console.log('list rows:', rows.length)
+const firstLogo = container.querySelector('.xzr-logo')
+const logoSrc = firstLogo?.getAttribute('src') ?? ''
+console.log('logo src:', logoSrc.slice(0, 46))
+if (!logoSrc.startsWith('/x-hot/img?url=')) throw new Error('logo should go through the image proxy')
 if (rows.length < 10) {
   console.log('list state:', container.querySelector('.xzr-state')?.textContent ?? '(none)')
   console.log('active tab:', container.querySelector('.xzr-tab.is-active')?.textContent, '| state:', container.querySelector('.xzr-state')?.textContent ?? '(none)')
@@ -227,7 +231,8 @@ await click(ext)
 console.log('ext button -> opened:', opened.at(-1))
 
 // ---- 7. 导出三份预览 ---------------------------------------------------------
-const css = container.querySelector('.xzr-root style')?.textContent ?? ''
+// <style> 现在挂在 .xzr-root 外面(列表被隐藏时也要保留),所以直接找 container 下的 style
+const css = container.querySelector('style')?.textContent ?? ''
 const TOKENS = ':root{--dsw-alias-bg-base:#fff;--dsw-alias-bg-layer-1:#f4f5f7;--dsw-alias-label-primary:#1b1d21;--dsw-alias-label-secondary:#4d5157;--dsw-alias-label-tertiary:#7b8086;--dsw-alias-label-caption:#9296a0;--dsw-alias-border-l1:#eceef1;--dsw-alias-border-l2:#e2e4e8;--dsw-alias-interactive-bg-hover:#f3f4f6;--dsw-alias-brand-primary:#3b6ef5;--dsw-alias-state-error-primary:#d64545;--dsw-radius-sm:6px;--dsw-radius-md:8px}'
 const shell = (body, title) => `<!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><title>${title}</title>
@@ -237,7 +242,14 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang
 #root{height:900px}
 ${css}
 </style></head><body><div id="root">${body}</div></body></html>`
-const bodyOf = () => container.innerHTML.replace(/<style>[\s\S]*?<\/style>/, '')
+// 静态预览里没有 React,onError 回落不会执行;导出时把反代地址换回原图地址
+const bodyOf = () =>
+  container.innerHTML
+    .replace(/<style>[\s\S]*?<\/style>/, '')
+    .replace(/src="\/x-hot\/img\?url=([^"]+)"/g, (_m, encoded) => {
+      const raw = decodeURIComponent(encoded.replace(/&amp;/g, '&'))
+      return `src="${raw}"`
+    })
 
 writeFileSync(new URL('./preview-episodes.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 热门单集'))
 

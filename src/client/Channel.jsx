@@ -1,6 +1,7 @@
 /** 单个播客频道的分集列表:点一行就开始总结,↗ 去小宇宙看原页。 */
 import { useMemo, useState } from 'react'
 import { formatDay, formatDuration } from './format.js'
+import { RemoteImage } from './RemoteImage.jsx'
 
 export function ChannelView({ podcast, data, loading, error, onBack, onRetry, summarize, openExternal, isDone, isFavorite, onToggleFavorite }) {
   const [query, setQuery] = useState('')
@@ -26,7 +27,7 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
         </button>
 
         <div className="xzr-ch-id">
-          {podcast?.logo ? <img className="xzr-ch-logo" src={podcast.logo} alt="" referrerPolicy="no-referrer" /> : null}
+          {podcast?.logo ? <RemoteImage className="xzr-ch-logo" src={podcast.logo} /> : null}
           <div className="xzr-ch-meta">
             <h2 className="xzr-ch-title">{podcast?.title ?? data?.title ?? ''}</h2>
             <p className="xzr-ch-sub">
