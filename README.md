@@ -26,7 +26,10 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 
 - 键优先用单集 id(`eid` / RSS 的 `xmly_track_*`),没有就退化到链接;
 - **同一集换了来源也能认出来**:小宇宙页面给的是 24 位 eid,而喜马拉雅托管的播客 RSS 给的是 `xmly_track_*`,两套 id 对不上;所以「已总结」判断是 **id 或标题(去空白、小写后)任一命中**,再点同一集也会归并到原来那条记录,不会出现两行;
-- 写入用 tmp + rename,不会写坏;每次落盘前把上一版复制成 `library.json.bak`,主文件丢失/损坏时自动从备份读回;
+- 写入用 tmp + rename,不会写坏;每次落盘前把上一版复制成 `library.json.bak`;
+- **每天第一份写入前留一份带日期的快照** `backups/library-YYYY-MM-DD.json`(保留 14 份);主文件、`.bak` 都没了会自动从最新快照恢复;
+- **没读过盘就不写**:刚启动、还没人访问的进程在 dispose 时不会拿空表覆盖磁盘(踩过,见 `test-guard.mjs`);
+- 读到坏 JSON 时置 `loadFailed`,之后拒绝写盘,避免把还能人工抢救的文件清空;
 - 写入有 150ms 合并窗口,插件卸载/热重载时立即落盘(不等窗口);`MAX_LIBRARY` 2000 条封顶,超出丢最旧;
 - **测试隔离**:`test-host.mjs` / `test-client.mjs` 会把 `DSH_HOME` 指到临时目录,绝不碰真实记录;
 - 面板里:**行首 ✓ + 「已总结」小标签**、频道页头部「已总结 N」、`我的总结` tab(可按关键词过滤,点 × 取消标记);

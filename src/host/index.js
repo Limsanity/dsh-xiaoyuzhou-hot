@@ -12,9 +12,9 @@
  *   GET /x-hot/channel?id=<小宇宙播客 id>&apple=<Apple Podcasts id>
  *   GET /x-hot/health
  */
-import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 
 export const name = 'xiaoyuzhou-hot'
@@ -242,6 +242,10 @@ class Library {
     this.path = path
     this.fields = fields
     this.backupPath = `${path}.bak`
+    // 每天第一次写盘前留一份带日期的快照,保留最近 14 份
+    this.snapshotDir = join(dirname(path), 'backups')
+    this.snapshotPrefix = `${basename(path, '.json')}-`
+    this.snapshotKeep = 14
     this.log = log
     this.items = new Map()
     this.loaded = false
@@ -255,7 +259,8 @@ class Library {
     if (this.loaded) return this.items
     if (this.loading === undefined) {
       this.loading = (async () => {
-        const found = await this.readFirst([this.path, this.backupPath])
+        let found = await this.readFirst([this.path, this.backupPath])
+        if (!found) found = await this.readNewestSnapshot()
         if (found) {
           try {
             const parsed = JSON.parse(found.raw)
@@ -279,6 +284,69 @@ class Library {
       })
     }
     return this.loading
+  }
+
+  /** 从 backups/ 里挑该 store 的最新快照 */
+  async readNewestSnapshot() {
+    let names = []
+    try {
+      names = await readdir(this.snapshotDir)
+    } catch {
+      return undefined
+    }
+    const candidates = names
+      .filter((name) => name.startsWith(this.snapshotPrefix) && name.endsWith('.json'))
+      .sort()
+      .reverse()
+    for (const name of candidates) {
+      try {
+        return { path: join(this.snapshotDir, name), raw: await readFile(join(this.snapshotDir, name), 'utf8') }
+      } catch {
+        continue
+      }
+    }
+    return undefined
+  }
+
+  /** 每天第一次写之前,把当前文件复制成带日期的快照 */
+  async writeDailySnapshot() {
+    const today = new Date().toISOString().slice(0, 10)
+    const target = join(this.snapshotDir, `${this.snapshotPrefix}${today}.json`)
+    try {
+      await stat(target)
+      return
+    } catch {
+      // 今天还没有
+    }
+    try {
+      await mkdir(this.snapshotDir, { recursive: true })
+      await copyFile(this.path, target)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        this.log?.warn?.(`xiaoyuzhou-hot: 快照失败 (${error?.message ?? error})`)
+      }
+    }
+  }
+
+  /** 只保留最近 N 份快照 */
+  async pruneSnapshots() {
+    let names = []
+    try {
+      names = await readdir(this.snapshotDir)
+    } catch {
+      return
+    }
+    const mine = names
+      .filter((name) => name.startsWith(this.snapshotPrefix) && name.endsWith('.json'))
+      .sort()
+      .reverse()
+    for (const name of mine.slice(this.snapshotKeep)) {
+      try {
+        await unlink(join(this.snapshotDir, name))
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   async readFirst(paths) {
@@ -361,6 +429,7 @@ class Library {
     }
     try {
       await mkdir(dirname(this.path), { recursive: true })
+      await this.writeDailySnapshot()
       const payload = JSON.stringify({ version: 1, items: [...this.items.values()] }, null, 2)
       const tmp = `${this.path}.tmp`
       await writeFile(tmp, payload, 'utf8')
@@ -370,6 +439,7 @@ class Library {
         if (error?.code !== 'ENOENT') throw error
       }
       await rename(tmp, this.path)
+      await this.pruneSnapshots()
     } catch (error) {
       this.log?.warn?.(`xiaoyuzhou-hot: library 写入失败 (${error?.message ?? error})`)
     }
