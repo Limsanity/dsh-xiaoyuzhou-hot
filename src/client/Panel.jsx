@@ -38,6 +38,26 @@ async function fetchList(kind, signal) {
 }
 
 const KIND_KEY = 'xzr.kind'
+const PENDING_KEY = 'xzr.pending'
+
+/** 写库失败时先存本地,下次打开面板再补发,避免"点了但没记住" */
+function readPending() {
+  try {
+    const raw = window.localStorage?.getItem(PENDING_KEY)
+    const list = raw ? JSON.parse(raw) : []
+    return Array.isArray(list) ? list : []
+  } catch {
+    return []
+  }
+}
+
+function writePending(list) {
+  try {
+    window.localStorage?.setItem(PENDING_KEY, JSON.stringify(list.slice(-200)))
+  } catch {
+    /* 存不下就算了 */
+  }
+}
 
 function initialKind() {
   try {
@@ -238,6 +258,33 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
     window.open(url, '_blank', 'noopener,noreferrer')
   }, [openExternal])
 
+  const flushPending = useCallback(async () => {
+    const pending = readPending()
+    if (pending.length === 0) return
+    const left = []
+    for (const entry of pending) {
+      try {
+        const res = await fetch('/x-hot/library', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(entry),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      } catch {
+        left.push(entry)
+      }
+    }
+    writePending(left)
+    if (left.length === 0) {
+      const data = await fetch('/x-hot/library').then((r) => r.json()).catch(() => null)
+      if (data?.ok) setLibrary(data.items ?? [])
+    }
+  }, [])
+
+  useEffect(() => {
+    flushPending()
+  }, [flushPending])
+
   const markSummarized = useCallback((item, podcast) => {
     // 同一集可能换了来源(id 不同):先按标题找已有记录,别重复建行
     const known = libraryIndex.find(item)
@@ -264,7 +311,10 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
           setLibrary((prev) => [data.item, ...prev.filter((row) => row.key !== data.item.key)])
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        // 宿主没响应(重启中/路由 404)时先把记录留在本地,下次打开再补发
+        writePending([...readPending(), entry])
+      })
     return key
   }, [libraryIndex])
 
