@@ -38,7 +38,8 @@ const LOOKUP_TTL_MS = 24 * 60 * 60 * 1000
 const TIMEOUT_MS = 20_000
 const MAX_EPISODES = 300
 const MAX_LIBRARY = 2000
-const LIBRARY_DIR = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'xiaoyuzhou-hot')
+const LIBRARY_DIR =
+  process.env.XZR_DATA_DIR || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'xiaoyuzhou-hot')
 const LIBRARY_FILE = join(LIBRARY_DIR, 'library.json')
 const FAVORITES_FILE = join(LIBRARY_DIR, 'favorites.json')
 /** 已读记录里允许写入的字段与长度上限 */
@@ -244,6 +245,7 @@ class Library {
     this.log = log
     this.items = new Map()
     this.loaded = false
+    this.loadFailed = false
     this.loading = undefined
     this.timer = undefined
     this.pending = undefined
@@ -265,7 +267,9 @@ class Library {
               this.log?.warn?.('xiaoyuzhou-hot: 主记录文件不可用,已从 library.json.bak 恢复')
             }
           } catch (error) {
-            this.log?.warn?.(`xiaoyuzhou-hot: library 解析失败,按空库继续 (${error?.message ?? error})`)
+            // 解析失败时不许再写:否则一次空写就把还能人工抢救的文件清掉了
+            this.loadFailed = true
+            this.log?.warn?.(`xiaoyuzhou-hot: library 解析失败,本次不写盘 (${error?.message ?? error})`)
           }
         }
         this.loaded = true
@@ -338,6 +342,7 @@ class Library {
 
   /** 卸载/退出前立即落盘,不等窗口 */
   async flushNow() {
+    if (!this.loaded) await this.load()
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = undefined
@@ -347,6 +352,13 @@ class Library {
   }
 
   async write() {
+    // 关键:没读过盘就别写。否则一个刚启动、还没被访问过的进程在 dispose 时
+    // 会把内存里的空表写回磁盘,把用户数据整份清空(真实踩过一次)。
+    if (!this.loaded) await this.load()
+    if (this.loadFailed) {
+      this.log?.warn?.('xiaoyuzhou-hot: 上次读取失败,跳过写盘以免覆盖')
+      return
+    }
     try {
       await mkdir(dirname(this.path), { recursive: true })
       const payload = JSON.stringify({ version: 1, items: [...this.items.values()] }, null, 2)

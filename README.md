@@ -45,6 +45,29 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 - 6 秒内没等到就放弃(比如 DSH 复用了空白会话,不会新建);
 - 有 `sessionId` 的行:点击 → `uiWorkspace.openSession(id)` 跳回那次对话,右侧另有 ↗ 去小宇宙;没有的行点击仍然是打开小宇宙。
 
+### 数据在哪(多设备必看)
+
+`library.json` / `favorites.json` 都在**宿主机的磁盘**上,不在浏览器里:
+
+```
+$XZR_DATA_DIR                     # 优先(可指向 iCloud/Dropbox 之类的同步目录)
+$DSH_HOME/xiaoyuzhou-hot/         # 否则默认
+```
+
+所以:
+
+- 同一台 dsh 服务、用不同浏览器/设备访问 → 看到的是**同一份**数据;
+- 另一台机器上的 dsh 实例 → 它有自己的 `$DSH_HOME`,默认是**空的**,不会自动同步。
+
+想在局域网里用手机 / 另一台电脑访问同一份数据,别另起实例,而是把这台机器的 dsh 暴露到 LAN:
+
+```bash
+dsh --profile web --host 192.168.x.x --trusted-host 192.168.x.x:3080 --no-open
+# 然后在别的设备上打开 http://192.168.x.x:3080/connect?token=... (按启动时打印的 URL)
+```
+
+真要多实例共享(比如笔记本+台式各跑一个 dsh),把两边的 `XZR_DATA_DIR` 指到同一个同步目录;**注意并发写**:两个实例同时写会互相覆盖,别在两边同时点收藏。
+
 ### 记录丢了/没关联会话怎么补救
 
 面板里:`我的总结` → 右下角 **重新关联会话** 按钮,点完给一行反馈(`匹配 N · 新关联 M`)。
@@ -57,6 +80,15 @@ node scripts/relink-sessions.mjs             # 回写 sessionId(走插件接口)
 ```
 
 接口:`POST /x-hot/library/relink` → `{ scanned, matched, linked, items }`。
+
+如果连记录条都没了(文件被清空/损坏),从会话历史**整表重建**:
+
+```bash
+node scripts/rebuild-library.mjs --dry-run   # 先看能扫出哪些
+node scripts/rebuild-library.mjs             # 写回(会话 id 一起带上)
+```
+
+它扫所有会话里以「总结《播客》单集标题」开头的用户消息,抽 `播客/单集页/音频直链`,按单集 id 归并后写回。收藏没这个来源,删了只能重新点星。
 
 它扫 `$DSH_HOME/sessions/*/session-*/session.v4.jsonl.zstd`,找以「总结《播客》单集标题」开头的用户消息,按标题和 `library.json` 对齐后调用 `POST /x-hot/library` 补 `sessionId`。
 
