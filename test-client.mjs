@@ -23,8 +23,17 @@ const require = createRequire(import.meta.url)
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'xzr-client-test-'))
 const RELINK_SESSION = 'feed0000-1111-4222-8333-444444444444'
 {
+  // 质检要从会话里取正文:给后面 linkSession 得到的 sum-1 造一份
+  const summary = '## 一句话结论\n这是从会话里读出来的总结。' + '补充细节。'.repeat(150) + '\n\n## 我的判断\n该复核的是毛利是否 ≥ 45%。'
+  const line = JSON.stringify({ type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: summary }] } } })
+  const dir = join(process.env.DSH_HOME, 'sessions', '--tmp--', 'session-sum-1')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(line + '\n')))
+}
+{
   // 一个"当时没抓到 id"的总结会话,正文只用于标题匹配
-  const prompt = '总结《三个火呛手》Vol.163 人生是一片旷野 方向就是前进\n\n播客：三个火呛手\n'
+  // 用固定标题,别依赖榜单当前的第一条(榜单每小时都在变)
+  const prompt = '总结《测试播客》固定标题单集\n\n播客：测试播客\n'
   const line = JSON.stringify({ type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: prompt }] } })
   const dir = join(process.env.DSH_HOME, 'sessions', '--tmp--', `session-${RELINK_SESSION}`)
   mkdirSync(dir, { recursive: true })
@@ -171,7 +180,7 @@ if (sessionCalls.length !== 0) throw new Error('clicking a podcast must not star
 
 // 频道里点第一集 → 新会话 + 预填(带音频直链)
 await click(chRows[0])
-setTimeout(() => { byId['sum-1'] = {} }, 400)
+setTimeout(() => { byId['session-sum-1'] = {} }, 400)
 const chCall = sessionCalls.at(-1)
 const chPrompt = chCall?.options?.prompt ?? ''
 console.log('channel episode -> sessionCalls:', sessionCalls.length, '| promptLen:', chPrompt.length)
@@ -182,7 +191,7 @@ if (libraryPosts.length === 0) throw new Error('clicking an episode should recor
 await tick(1400)
 const linkedPost = libraryPosts.filter((row) => row.sessionId).at(-1)
 console.log('session link write:', JSON.stringify(linkedPost))
-if (!linkedPost || linkedPost.sessionId !== 'sum-1') throw new Error('session id was not written back to the library')
+if (!linkedPost || linkedPost.sessionId !== 'session-sum-1') throw new Error('session id was not written back to the library')
 const doneChip = container.querySelector('.xzr-done')
 console.log('done chip:', doneChip?.textContent ?? '(none)')
 if (!doneChip) throw new Error('summarized episode should show the done chip')
@@ -279,8 +288,14 @@ console.log('library link chip:', linkChip?.textContent ?? '(none)', '| linked r
 if (!linkedRow) throw new Error('no linked row found')
 await click(linkedRow)
 console.log('library row click -> sessions opened:', JSON.stringify(openedSessions), '| external opens:', opened.length)
-if (openedSessions.at(-1) !== 'sum-1') throw new Error('clicking a linked row should open its session')
+if (openedSessions.at(-1) !== 'session-sum-1') throw new Error('clicking a linked row should open its session')
 console.log('link chips before relink:', container.querySelectorAll('.xzr-ch-done').length)
+// 先塞一条"没抓到会话 id"的固定记录,让 relink 有确定的目标
+await fetch('/x-hot/library', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ key: 'seed-fixed', title: '固定标题单集', podcast: '测试播客' }),
+})
 const relinkBtn = container.querySelector('.xzr-linkbtn')
 if (!relinkBtn) throw new Error('relink button missing')
 await click(relinkBtn)
@@ -289,6 +304,18 @@ console.log('relink note:', container.querySelector('.xzr-note')?.textContent)
 const linkedRows = [...container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')].filter((row) => row.textContent.includes('已关联会话'))
 console.log('linked rows after relink:', linkedRows.length)
 if (linkedRows.length < 2) throw new Error('relink did not attach the second entry')
+// ---- 质检:从会话里取正文打分 ----
+const targetRow = [...container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')].find((row) =>
+  row.textContent.includes('鲁豫对话刘索拉'),
+)
+const checkBtn = targetRow?.closest('li')?.querySelector('.xzr-ext-check')
+if (!checkBtn) throw new Error('check button missing on the linked row')
+await click(checkBtn)
+await tick(1500)
+const checkPanel = container.querySelector('.xzr-check-panel')
+console.log('check score:', container.querySelector('.xzr-score')?.textContent, '| grade:', container.querySelector('.xzr-grade')?.textContent, '| issues:', checkPanel?.querySelectorAll('.xzr-issue').length ?? 0)
+if (!checkPanel) throw new Error('check panel did not render')
+if (!container.querySelector('.xzr-score')) throw new Error('check score missing')
 writeFileSync(new URL('./preview-library.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · 我的总结'))
 
 // ---- 我的收藏 tab ----

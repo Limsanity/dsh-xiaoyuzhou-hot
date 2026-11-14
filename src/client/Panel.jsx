@@ -780,6 +780,23 @@ function FavoritesList({ items, query, openChannel, openExternal, onRemove }) {
 
 function LibraryList({ items, query, openExternal, onRemove, openSession }) {
   const [note, setNote] = useState('')
+  const [check, setCheck] = useState({ key: '', loading: false, result: null, error: '' })
+
+  const runCheck = useCallback(async (item) => {
+    setCheck({ key: item.key, loading: true, result: null, error: '' })
+    try {
+      const res = await fetch('/x-hot/library/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: item.key }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      setCheck({ key: item.key, loading: false, result: data, error: '' })
+    } catch (error) {
+      setCheck({ key: item.key, loading: false, result: null, error: String(error?.message ?? error) })
+    }
+  }, [])
 
   const openItem = useCallback(
     (item) => {
@@ -832,7 +849,7 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
         <li key={item.key} className="xzr-item">
           <button
             type="button"
-            className="xzr-row"
+            className={`xzr-row${item.sessionId ? ' xzr-row-wide' : ''}`}
             onClick={() => openItem(item)}
             aria-label={item.sessionId ? `打开那次总结会话:${item.title}` : `在小宇宙打开:${item.title}`}
           >
@@ -855,6 +872,16 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
           {item.sessionId ? (
             <button
               type="button"
+              className="xzr-ext xzr-ext-check"
+              onClick={() => runCheck(item)}
+              aria-label={`质检:${item.title}`}
+            >
+              检
+            </button>
+          ) : null}
+          {item.sessionId ? (
+            <button
+              type="button"
               className="xzr-ext xzr-ext-left"
               onClick={() => openExternal(item.url)}
               aria-label="在小宇宙打开这一集"
@@ -874,6 +901,46 @@ function LibraryList({ items, query, openExternal, onRemove, openSession }) {
           >
             ×
           </button>
+          {check.key === item.key && (check.loading || check.result || check.error) ? (
+            <div className="xzr-check-panel">
+              {check.loading ? <div>正在检查正文…</div> : null}
+              {check.error ? <div className="xzr-check-error">{check.error}</div> : null}
+              {check.result ? (
+                <>
+                  <div className="xzr-check-head">
+                    <span className="xzr-score">{check.result.score}</span>
+                    <span className={`xzr-grade g-${check.result.grade}`}>{check.result.grade}</span>
+                    <span className="xzr-check-meta">
+                      {check.result.stats?.chars} 字 · {check.result.stats?.paragraphs} 段 · {check.result.stats?.numbers} 个数字
+                    </span>
+                    <button
+                      type="button"
+                      className="xzr-linkbtn"
+                      onClick={() => setCheck({ key: '', loading: false, result: null, error: '' })}
+                    >
+                      收起
+                    </button>
+                  </div>
+                  {check.result.issues.length === 0 ? (
+                    <div>规则自检全部通过。</div>
+                  ) : (
+                    check.result.issues.map((issue) => (
+                      <div className="xzr-issue" key={issue.code}>
+                        <span className={`xzr-dot d-${issue.level}`} />
+                        <span>
+                          {issue.message}
+                          {issue.evidence ? <em className="xzr-evidence">「{issue.evidence}」</em> : null}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <div className="xzr-check-foot">
+                    规则自检（不看内容对错），专抓工序日志、数字无锚、引号归属、可执行性这些交付问题。
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : null}
           </li>
         ))}
       </ol>
@@ -1010,6 +1077,23 @@ const STYLES = `
 .xzr-stat{display:flex;flex-direction:column;align-items:flex-end;min-width:52px}
 .xzr-stat b{font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}
 .xzr-stat i{font-style:normal;font-size:10.5px;color:var(--dsw-alias-label-caption)}
+.xzr-ext.xzr-ext-check{right:38px;font-size:11px;letter-spacing:.02em}
+.xzr-row.xzr-row-wide{padding-right:104px}
+.xzr-ext.xzr-ext-left{right:68px}
+.xzr-check-panel{margin:0 10px 10px 42px;padding:10px 12px;border-radius:var(--dsw-radius-md);
+  background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.6}
+.xzr-check-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.xzr-score{font-size:16px;font-weight:700;color:var(--dsw-alias-label-primary)}
+.xzr-grade{padding:0 6px;border-radius:4px;font-size:11px;font-weight:700;color:#fff;background:var(--dsw-alias-label-tertiary)}
+.xzr-grade.g-A{background:#3c9a63}.xzr-grade.g-B{background:#3b6ef5}
+.xzr-grade.g-C{background:#c08a2e}.xzr-grade.g-D{background:#c14747}
+.xzr-check-meta{margin-left:auto;color:var(--dsw-alias-label-caption);font-size:11px}
+.xzr-issue{display:flex;gap:7px;margin:3px 0;align-items:flex-start}
+.xzr-dot{flex:none;width:6px;height:6px;border-radius:50%;margin-top:6px;background:var(--dsw-alias-label-caption)}
+.xzr-dot.d-high{background:#c14747}.xzr-dot.d-mid{background:#c08a2e}.xzr-dot.d-low{background:var(--dsw-alias-label-caption)}
+.xzr-evidence{font-style:normal;color:var(--dsw-alias-label-caption);margin-left:4px}
+.xzr-check-foot{margin-top:6px;color:var(--dsw-alias-label-caption);font-size:10.5px}
+.xzr-check-error{color:var(--dsw-alias-state-error-primary)}
 .xzr-banner{margin:6px 14px;padding:7px 10px;border-radius:var(--dsw-radius-sm);
   background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12px}
 .xzr-state{padding:56px 24px;text-align:center;color:var(--dsw-alias-label-tertiary)}

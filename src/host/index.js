@@ -13,6 +13,7 @@
  *   GET /x-hot/health
  */
 import { copyFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { checkSummary } from './check.js'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
@@ -522,6 +523,28 @@ function summaryPromptOf(text) {
 
 const normalizeTitle = (value) => String(value ?? '').replace(/\s+/g, '')
 
+/** 取会话里最后一段像"总结"的 assistant 正文 */
+function lastAssistantText(sessionText) {
+  let best = ''
+  for (const line of sessionText.split('\n')) {
+    if (!line.startsWith('{') || !line.includes('"assistant/message"')) continue
+    let event
+    try {
+      event = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const parts = event?.data?.message?.content ?? event?.data?.content ?? []
+    const text = parts
+      .filter((part) => part?.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+      .trim()
+    if (text.length > 400) best = text
+  }
+  return best
+}
+
 async function listSessionFiles(root, limit) {
   const files = []
   let workspaces = []
@@ -1029,6 +1052,42 @@ export function apply(ctx, config = {}) {
           return sendJson(res, 200, { ok: true, ...result, items })
         } catch (error) {
           log.warn?.(`xiaoyuzhou-hot: rebuild favorites ${error?.stack ?? error}`)
+          return sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/x-hot/library/check',
+      handler: async (req, res) => {
+        if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        try {
+          const body = await readJsonBody(req)
+          const key = String(body?.key ?? '').trim()
+          if (!key) return sendJson(res, 400, { ok: false, error: 'key 不能为空' })
+
+          let text = typeof body?.text === 'string' ? body.text : ''
+          let title = ''
+          if (!text) {
+            const item = (await library.list()).find((row) => row.key === key)
+            if (!item) return sendJson(res, 404, { ok: false, error: '记录不存在' })
+            title = item.title ?? ''
+            if (!item.sessionId) return sendJson(res, 400, { ok: false, error: '这条记录没有关联会话,无法取正文' })
+            const found = (await listSessionFiles(SESSION_ROOT, SESSION_SCAN_LIMIT)).find(
+              (entry) => entry.sessionId === item.sessionId,
+            )
+            if (!found) return sendJson(res, 404, { ok: false, error: `找不到会话文件:${item.sessionId}` })
+            text = lastAssistantText(decodeSessionFile(await readFile(found.file)))
+            if (!text) return sendJson(res, 422, { ok: false, error: '会话里没有可检查的正文' })
+          }
+
+          const result = checkSummary(text)
+          return sendJson(res, 200, { ok: true, key, title, ...result })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: check ${error?.stack ?? error}`)
           return sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
         }
       },
