@@ -104,6 +104,27 @@ export function checkSummary(raw) {
     })
   }
 
+  if (headings > 6) {
+    issues.push({
+      level: 'mid',
+      deduction: 0.5,
+      code: 'too-many-sections',
+      message: `分了 ${headings} 个小节,更像话题清单而不是一条论证线`,
+      evidence: '建议压到 3–5 个论点,把同类材料合并',
+    })
+  }
+
+  const tldr = /一句话结论[^\n]*\n+([\s\S]*?)\n\n/.exec(text)?.[1]?.replace(/\s+/g, '') ?? ''
+  if (tldr.length > 220) {
+    issues.push({
+      level: 'low',
+      deduction: 0.3,
+      code: 'long-tldr',
+      message: `结论段 ${tldr.length} 字,开头就灌满了,读者抓不住一句判断`,
+      evidence: tldr.slice(0, 40) + '…',
+    })
+  }
+
   if (numbers.length >= 5 && timecodes < 2) {
     issues.push({
       level: 'low',
