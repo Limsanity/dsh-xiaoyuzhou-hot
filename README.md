@@ -170,6 +170,9 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | `ungrounded-numbers` | 一句话堆 3 个以上数字、全文无来源词累计 ≥5 个 | 0.6 |
 | `boilerplate-opener` | 「全场最…」式总起句用了 ≥2 次 | 0.3 |
 | `too-many-sections` | 小节 >6 个（像话题清单而非论证线） | 0.5 |
+| `weak-linkage` | 推进词（因此/但/这说明…）少于小节数×2 | 0.4 |
+| `judgement-in-body` | 正文里出现「我的判断」（作者评论混进论证） | 0.5 |
+| `timecode-flood` | 时间码 >12 个（证据变流水账） | 0.4 |
 | `long-tldr` | 「一句话结论」>220 字 | 0.3 |
 | `too-short` / `too-long` | <1200 字 / >8000 字 | 0.3 |
 | `quote-ownership` | 有引号但没标原话/概括 | 0.3 |

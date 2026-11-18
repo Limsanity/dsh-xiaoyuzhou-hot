@@ -104,6 +104,41 @@ export function checkSummary(raw) {
     })
   }
 
+  // 论证结构的三条信号:时间码泛滥、作者判断混入正文、论点间缺连接
+  const lastSection = text.search(/^##\s*(我的判断|四、|4\))/m)
+  const bodyText = lastSection > 0 ? text.slice(0, lastSection) : text
+  const judgementInBody = (bodyText.match(/我的判断/g) ?? []).length
+  if (judgementInBody >= 1) {
+    issues.push({
+      level: 'mid',
+      deduction: 0.5,
+      code: 'judgement-in-body',
+      message: `正文里出现 ${judgementInBody} 次「我的判断」，作者评论混进了论证`,
+      evidence: '论证段只放嘉宾的主张与证据,评论留到最后一节',
+    })
+  }
+
+  if (timecodes > 12) {
+    issues.push({
+      level: 'low',
+      deduction: 0.4,
+      code: 'timecode-flood',
+      message: `${timecodes} 个时间码，证据变成了流水账`,
+      evidence: '全篇控制在 12 个以内,只标关键证据',
+    })
+  }
+
+  const connectives = (bodyText.match(/(因此|所以|这说明|也就是说|反过来|但是|然而|换句话说)/g) ?? []).length
+  if (headings >= 3 && connectives < headings * 2) {
+    issues.push({
+      level: 'mid',
+      deduction: 0.4,
+      code: 'weak-linkage',
+      message: `只有 ${connectives} 处推进词，论点更像并列而不是一条链`,
+      evidence: '每节开头补一句承接,说明它如何接上一节',
+    })
+  }
+
   if (headings > 6) {
     issues.push({
       level: 'mid',
