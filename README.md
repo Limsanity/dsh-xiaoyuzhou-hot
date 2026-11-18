@@ -24,7 +24,7 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 { "version": 1, "items": [ { key, title, podcast, url, podcastUrl, at } ] }
 ```
 
-- 键优先用单集 id(`eid` / RSS 的 `xmly_track_*`),没有就退化到链接;
+- 键优先用单集 id(`eid` / RSS 的 `xmly_track_*`);「热门单集」的链接里能抠出 eid,也会统一成 id,不再退化成整条 URL;
 - **同一集换了来源也能认出来**:小宇宙页面给的是 24 位 eid,而喜马拉雅托管的播客 RSS 给的是 `xmly_track_*`,两套 id 对不上;所以「已总结」判断是 **id 或标题(去空白、小写后)任一命中**,再点同一集也会归并到原来那条记录,不会出现两行;
 - 写入用 tmp + rename,不会写坏;每次落盘前把上一版复制成 `library.json.bak`;
 - **每天第一份写入前留一份带日期的快照** `backups/library-YYYY-MM-DD.json`(保留 14 份);主文件、`.bak` 都没了会自动从最新快照恢复;
@@ -45,7 +45,8 @@ $DSH_HOME/xiaoyuzhou-hot/library.json     # 默认 ~/.dsh/xiaoyuzhou-hot/library
 ```
 
 - `startSession()` 不返回 id,所以用"前后快照差"来认定:只多出一个才算,多出多个(并发操作)就放弃关联——宁可没链接,也不链错;
-- 6 秒内没等到就放弃(比如 DSH 复用了空白会话,不会新建);
+- 6 秒内没等到就放弃(最常见的原因:DSH **复用了你之前留下的空白会话**,不会新建,快照里就没有"新 id");
+- 有未关联记录时,面板挂载会自动跑一次 relink(等价于点页脚按钮),按标题补上——复用的空白会话、创建时的临时失败都能靠它兜住;
 - 有 `sessionId` 的行:点击 → `uiWorkspace.openSession(id)` 跳回那次对话,右侧另有 ↗ 去小宇宙;没有的行点击仍然是打开小宇宙。
 
 ### 数据在哪(多设备必看)

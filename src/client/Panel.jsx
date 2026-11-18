@@ -321,11 +321,17 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
 
   const linkSession = useCallback((key, sessionId) => {
     setLibrary((prev) => prev.map((row) => (row.key === key ? { ...row, sessionId } : row)))
-    fetch('/x-hot/library', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ key, sessionId }),
-    }).catch(() => {})
+    const post = () =>
+      fetch('/x-hot/library', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key, sessionId }),
+      }).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+    // 失败就再试一次;还不行也不慌,下次打开面板会自动 relink 补上
+    post().catch(() => new Promise((resolve) => setTimeout(resolve, 1200)).then(post)).catch(() => {})
   }, [])
 
   const toggleFavorite = useCallback((podcast) => {
@@ -353,6 +359,8 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       body: JSON.stringify(entry),
     }).catch(() => {})
   }, [favorites])
+
+  const autoRelinked = useRef(false)
 
   const relinkSessions = useCallback(async () => {
     setRelinking(true)
@@ -385,6 +393,19 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       setRebuildingFavs(false)
     }
   }, [])
+
+  // 有「没关联上会话」的记录时,自动补一次(等价于点页脚那个按钮,但不打扰你)
+  useEffect(() => {
+    if (autoRelinked.current) return
+    if (!library.some((item) => !item.sessionId)) return
+    autoRelinked.current = true
+    fetch('/x-hot/library/relink', { method: 'POST' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.ok && data.linked > 0) setLibrary(data.items ?? [])
+      })
+      .catch(() => {})
+  }, [library])
 
   const removeSummarized = useCallback((key) => {
     setLibrary((prev) => prev.filter((row) => row.key !== key))

@@ -6,9 +6,17 @@
  * 所以既按 id 认,也按标题认:标题归一化(去空白、小写)后相同就算同一集。
  */
 
-/** 单集在记录里的键:优先用 id,退化成链接/标题 */
+/** 从单集链接里抠出小宇宙 eid(24 位 hex) */
+function idFromUrl(url) {
+  return /xiaoyuzhoufm\.com\/episode\/([0-9a-f]{24})/i.exec(String(url ?? ''))?.[1] ?? ''
+}
+
+/**
+ * 单集在记录里的键:优先 id,其次从链接里抠 eid,最后才退回链接/标题。
+ * 以前「热门单集」没有 id 字段,记录就存成了整条 URL——同一集会出现两条记录。
+ */
 export function keyOf(episode) {
-  return String(episode?.id || episode?.url || episode?.title || '')
+  return String(episode?.id || idFromUrl(episode?.url) || episode?.url || episode?.title || '')
 }
 
 export function normalizeTitle(value) {
