@@ -149,6 +149,18 @@ export function checkSummary(raw) {
     })
   }
 
+  const boundaryBlocks = text.match(/\*\*边界\*\*[：:]([^\n]*)/g) ?? []
+  const boundaryChars = boundaryBlocks.reduce((sum, block) => sum + block.length, 0)
+  if (boundaryBlocks.length >= 2 && boundaryChars / Math.max(1, chars) > 0.12) {
+    issues.push({
+      level: 'mid',
+      deduction: 0.4,
+      code: 'fat-boundary',
+      message: `「边界」占了 ${Math.round((boundaryChars / chars) * 100)}% 的篇幅（${boundaryBlocks.length} 处），像每节都要自我否定一遍`,
+      evidence: '只在证据只覆盖部分情形时写一句,评论放最后一节',
+    })
+  }
+
   const tldr = /一句话结论[^\n]*\n+([\s\S]*?)\n\n/.exec(text)?.[1]?.replace(/\s+/g, '') ?? ''
   if (tldr.length > 220) {
     issues.push({

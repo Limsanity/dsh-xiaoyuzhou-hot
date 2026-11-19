@@ -174,6 +174,7 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | `weak-linkage` | 推进词（因此/但/这说明…）少于小节数×2 | 0.4 |
 | `judgement-in-body` | 正文里出现「我的判断」（作者评论混进论证） | 0.5 |
 | `timecode-flood` | 时间码 >12 个（证据变流水账） | 0.4 |
+| `fat-boundary` | 「边界」占比 >12% 且 ≥2 处（每节都要自我否定） | 0.4 |
 | `long-tldr` | 「一句话结论」>220 字 | 0.3 |
 | `too-short` / `too-long` | <1200 字 / >8000 字 | 0.3 |
 | `quote-ownership` | 有引号但没标原话/概括 | 0.3 |
