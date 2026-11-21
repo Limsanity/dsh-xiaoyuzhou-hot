@@ -165,21 +165,17 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | 检查 | 抓什么 | 扣分 |
 |---|---|---|
 | `process-log` | 开头是转写参数/会话 id/「以下是总结」 | 1.2 |
+| `forbidden-sections` | 出现「金句 / 边界 / 我的判断 / 打折扣」等附加章节 | 0.5/个(上限 1.0) |
 | `long-paragraph` | 单段 > 300 字 | 0.3/段(上限 0.9) |
-| `no-judgement` | 没有「我的判断/打折扣/适合谁听」 | 1.0 |
-| `no-action` | 有判断但没有触发问句或阈值 | 0.8 |
+| `bullet-heavy` | 一半以上正文是列表（分段总结该是连贯段落） | 0.4 |
+| `too-many-sections` | 小节 >6 个 | 0.4 |
 | `ungrounded-numbers` | 一句话堆 3 个以上数字、全文无来源词累计 ≥5 个 | 0.6 |
-| `boilerplate-opener` | 「全场最…」式总起句用了 ≥2 次 | 0.3 |
-| `too-many-sections` | 小节 >6 个（像话题清单而非论证线） | 0.5 |
-| `weak-linkage` | 推进词（因此/但/这说明…）少于小节数×2 | 0.4 |
-| `judgement-in-body` | 正文里出现「我的判断」（作者评论混进论证） | 0.5 |
-| `timecode-flood` | 时间码 >12 个（证据变流水账） | 0.4 |
-| `fat-boundary` | 「边界」占比 >12% 且 ≥2 处（每节都要自我否定） | 0.4 |
-| `long-tldr` | 「一句话结论」>220 字 | 0.3 |
-| `too-short` / `too-long` | <1200 字 / >8000 字 | 0.3 |
+| `timecode-flood` | 时间码 >8 个 | 0.3 |
+| `boilerplate-opener` | 「全场最…」式总起句 ≥2 次 | 0.3 |
 | `quote-ownership` | 有引号但没标原话/概括 | 0.3 |
+| `too-short` / `too-long` | <800 字 / >4000 字 | 0.3 |
 
-规则来自 5 篇真实总结的独立评审(平均 48/60),结构类规则(`too-many-sections` / `long-tldr`)来自「读完觉得零散」这轮反馈——5 篇里 4 篇分了 7–11 个小节、11 篇 bullet 最多 54 条,确实是清单而不是论证线。**它不做内容对错判断**,只抓"交付形态"问题——所以措辞里写的是"规则自检",不要当事实核查。
+规则分两批:一批来自 5 篇总结的独立评审(工序日志、数字无锚、段落过长),另一批来自"读完觉得零散"的反馈(小节过多、清单化)。**它不做内容对错判断**,只抓"交付形态"问题——所以措辞写的是"规则自检",不要当事实核查。
 
 ### 路由
 
@@ -219,7 +215,7 @@ uiWorkspace.startSession(undefined, { prompt, clearPreviousDraft: true })
 - `sessionScope` 走 `ctx.inject(['uiWorkspace'])` 拿,晚于 `slots` 就绪也不会卡住面板注册;
 - 没有 `uiWorkspace`(非 Web 组合、或服务未就绪)时退化成打开小宇宙网页,不会静默失败;
 - 预填的 prompt 带标题、播客名、发布日期、时长、单集页链接;**从频道页点进来的还带音频直链**,流程会相应改成"页面打不开就直接下音频转写";
-- prompt 里写明流程(读 shownotes → mlx-whisper 转写 → 结论/要点/金句/判断),新会话不需要再问一遍"用什么工具";
+- prompt 里写明流程(读 shownotes → mlx-whisper 转写 → 只要「这期讲什么 + 分段总结」),新会话不需要再问一遍"用什么工具";
 - `clearPreviousDraft: true` 是刻意的:保证这次的任务真的落进输入框,代价是会覆盖被复用空白会话里的旧草稿。
 
 ## 数据与实现

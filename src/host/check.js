@@ -8,8 +8,6 @@
 
 const PROCESS_LOG = /(转写完成|已拿到|以下是总结|以下是这份笔记|处理说明|音频直链|mlx[-_]whisper|whisper-large|分钟跑完|会话：session-)/i
 const OPENERS = /(全场最|这段最扎|最狠的是|最精彩的是|最值得注意的)/g
-const JUDGEMENT = /(我的判断|打折扣|适合谁听|哪些说法)/ 
-const ACTIONABLE = /(该问|该盯|盯住|阈值|复核|检查清单|先问|≥|≤|达到.*才算|低于.*就该)/
 const SOURCE_WORD = /(自述|披露|招股书|口径|据|来源|估算|官方|报道|ASR|存疑)/
 
 const NUMERIC = /\d+(?:\.\d+)?\s*(?:亿|万|%|倍|美元|人民币|元|人|家|集|分钟|小时)/g
@@ -65,22 +63,7 @@ export function checkSummary(raw) {
     })
   }
 
-  if (!JUDGEMENT.test(text)) {
-    issues.push({
-      level: 'mid',
-      deduction: 1,
-      code: 'no-judgement',
-      message: '没有"我的判断/打折扣/适合谁听"这类落地段落',
-    })
-  } else if (!ACTIONABLE.test(text)) {
-    issues.push({
-      level: 'mid',
-      deduction: 0.8,
-      code: 'no-action',
-      message: '有判断但没有触发问句或阈值，读者带不走可执行动作',
-      evidence: '缺「该问…/达到 X 才算…」这类句式',
-    })
-  }
+
 
   const openers = text.match(OPENERS) ?? []
   if (openers.length >= 2) {
@@ -104,73 +87,55 @@ export function checkSummary(raw) {
     })
   }
 
-  // 论证结构的三条信号:时间码泛滥、作者判断混入正文、论点间缺连接
-  const lastSection = text.search(/^##\s*(我的判断|四、|4\))/m)
-  const bodyText = lastSection > 0 ? text.slice(0, lastSection) : text
-  const judgementInBody = (bodyText.match(/我的判断/g) ?? []).length
-  if (judgementInBody >= 1) {
+
+
+  const forbidden = text.match(/^#{2,4}[^\n]*(金句|边界|我的判断|打折扣|复核清单|适合谁听)[^\n]*/gm) ?? []
+  if (forbidden.length > 0) {
     issues.push({
-      level: 'mid',
-      deduction: 0.5,
-      code: 'judgement-in-body',
-      message: `正文里出现 ${judgementInBody} 次「我的判断」，作者评论混进了论证`,
-      evidence: '论证段只放嘉宾的主张与证据,评论留到最后一节',
+      level: 'high',
+      deduction: Math.min(1, forbidden.length * 0.5),
+      code: 'forbidden-sections',
+      message: `出现了不该有的附加章节：${forbidden.map((h) => h.replace(/^#+\s*/, '')).join('、')}`,
+      evidence: '只要「这期讲什么 + 分段总结」',
     })
   }
 
-  if (timecodes > 12) {
+  const bodyLines = text.split('\n').filter((line) => line.trim() && !line.startsWith('#'))
+  const bulletLines = bodyLines.filter((line) => /^\s*[-*]\s/.test(line)).length
+  if (bodyLines.length >= 8 && bulletLines / bodyLines.length > 0.5) {
+    issues.push({
+      level: 'mid',
+      deduction: 0.4,
+      code: 'bullet-heavy',
+      message: `${Math.round((bulletLines / bodyLines.length) * 100)}% 的正文是列表，分段总结应该是连贯段落`,
+    })
+  }
+
+  if (timecodes > 8) {
     issues.push({
       level: 'low',
       deduction: 0.4,
       code: 'timecode-flood',
       message: `${timecodes} 个时间码，证据变成了流水账`,
-      evidence: '全篇控制在 12 个以内,只标关键证据',
+      evidence: '全篇控制在 8 个以内,只标关键处',
     })
   }
 
-  const connectives = (bodyText.match(/(因此|所以|这说明|也就是说|反过来|但是|然而|换句话说)/g) ?? []).length
-  if (headings >= 3 && connectives < headings * 2) {
-    issues.push({
-      level: 'mid',
-      deduction: 0.4,
-      code: 'weak-linkage',
-      message: `只有 ${connectives} 处推进词，论点更像并列而不是一条链`,
-      evidence: '每节开头补一句承接,说明它如何接上一节',
-    })
-  }
+
 
   if (headings > 6) {
     issues.push({
       level: 'mid',
       deduction: 0.5,
       code: 'too-many-sections',
-      message: `分了 ${headings} 个小节,更像话题清单而不是一条论证线`,
-      evidence: '建议压到 3–5 个论点,把同类材料合并',
+      message: `分了 ${headings} 个小节,超过建议的 3–6 段`,
+      evidence: '把同类材料合并',
     })
   }
 
-  const boundaryBlocks = text.match(/\*\*边界\*\*[：:]([^\n]*)/g) ?? []
-  const boundaryChars = boundaryBlocks.reduce((sum, block) => sum + block.length, 0)
-  if (boundaryBlocks.length >= 2 && boundaryChars / Math.max(1, chars) > 0.12) {
-    issues.push({
-      level: 'mid',
-      deduction: 0.4,
-      code: 'fat-boundary',
-      message: `「边界」占了 ${Math.round((boundaryChars / chars) * 100)}% 的篇幅（${boundaryBlocks.length} 处），像每节都要自我否定一遍`,
-      evidence: '只在证据只覆盖部分情形时写一句,评论放最后一节',
-    })
-  }
 
-  const tldr = /一句话结论[^\n]*\n+([\s\S]*?)\n\n/.exec(text)?.[1]?.replace(/\s+/g, '') ?? ''
-  if (tldr.length > 220) {
-    issues.push({
-      level: 'low',
-      deduction: 0.3,
-      code: 'long-tldr',
-      message: `结论段 ${tldr.length} 字,开头就灌满了,读者抓不住一句判断`,
-      evidence: tldr.slice(0, 40) + '…',
-    })
-  }
+
+
 
   if (numbers.length >= 5 && timecodes < 2) {
     issues.push({
@@ -181,9 +146,9 @@ export function checkSummary(raw) {
     })
   }
 
-  if (chars < 1200) {
+  if (chars < 800) {
     issues.push({ level: 'low', deduction: 0.3, code: 'too-short', message: `只有 ${chars} 字，信息量可能不够` })
-  } else if (chars > 8000) {
+  } else if (chars > 4000) {
     issues.push({ level: 'low', deduction: 0.3, code: 'too-long', message: `${chars} 字偏长，读者很难一次读完` })
   }
 
