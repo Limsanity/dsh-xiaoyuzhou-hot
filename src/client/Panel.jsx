@@ -26,10 +26,19 @@ function pidOf(podcast) {
 
 /** 播客在收藏里的键:优先 pid,只有 Apple 信息时用 apple:<id> */
 function favoriteKey(podcast) {
-  return pidOf(podcast) || (podcast?.appleId ? `apple:${podcast.appleId}` : '')
+  return (
+    pidOf(podcast) ||
+    (podcast?.appleId ? `apple:${podcast.appleId}` : '') ||
+    (podcast?.feedUrl ? `feed:${podcast.feedUrl}` : '')
+  )
 }
 
 const PAGE_LIMIT = 100
+
+/** 不在小宇宙、也不在 Apple 中国区的播客,直接给 RSS */
+const FEED_PRESETS = [
+  { name: 'Acquired', feed: 'https://feeds.transistor.fm/acquired' },
+]
 
 async function fetchList(kind, signal) {
   const res = await fetch(`/x-hot/list?kind=${encodeURIComponent(kind)}&limit=${PAGE_LIMIT}`, { signal })
@@ -197,8 +206,11 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
     }
     try {
       const qs = new URLSearchParams({ limit: '300' })
-      if (id) qs.set('id', id)
-      if (podcast?.appleId) qs.set('apple', podcast.appleId)
+      if (podcast?.feedUrl) qs.set('feed', podcast.feedUrl)
+      else {
+        if (id) qs.set('id', id)
+        if (podcast?.appleId) qs.set('apple', podcast.appleId)
+      }
       const res = await fetch(`/x-hot/channel?${qs.toString()}`, { signal: controller.signal })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
@@ -228,13 +240,31 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
   const runSearch = useCallback(async (raw) => {
     const text = String(raw ?? '').trim()
     if (!text) return
-    const isLink = /xiaoyuzhoufm\.com\/(podcast|episode)\//i.test(text) || /^[0-9a-f]{24}$/i.test(text)
+    const isXyzLink = /xiaoyuzhoufm\.com\/(podcast|episode)\//i.test(text) || /^[0-9a-f]{24}$/i.test(text)
+    // 非小宇宙的 http(s) 地址一律当 RSS:Acquired 这类播客不在小宇宙、也不在中国区目录里
+    const isFeed = !isXyzLink && /^https?:\/\//i.test(text)
     setSearching(true)
     setSearchError('')
     setSearchResults([])
     setSearchTouched(true)
     try {
-      if (isLink) {
+      if (isFeed) {
+        const res = await fetch(`/x-hot/resolve-feed?url=${encodeURIComponent(text)}`)
+        const data = await res.json().catch(() => null)
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+        setSearching(false)
+        openChannel({
+          title: data.podcast?.title ?? '',
+          author: data.podcast?.author ?? '',
+          episodes: data.podcast?.episodes ?? 0,
+          logo: data.podcast?.logo ?? '',
+          feedUrl: data.podcast?.feedUrl ?? text,
+          siteUrl: data.podcast?.siteUrl ?? '',
+          url: '',
+        })
+        return
+      }
+      if (isXyzLink) {
         const res = await fetch(`/x-hot/resolve?url=${encodeURIComponent(text)}`)
         const data = await res.json().catch(() => null)
         if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`)
@@ -350,6 +380,8 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
       url: podcast?.url ?? '',
       appleId: podcast?.appleId ?? '',
       logo: podcast?.logo ?? '',
+      feedUrl: podcast?.feedUrl ?? '',
+      siteUrl: podcast?.siteUrl ?? '',
       at: Date.now(),
     }
     setFavorites((prev) => [entry, ...prev.filter((item) => item.key !== pid)])
@@ -575,7 +607,22 @@ export function HotPanel({ summarize, openExternal, sessionIds, watchNewSession,
             {!searchTouched ? (
               <div className="xzr-state">
                 <strong>找榜单外的播客</strong>
-                <p>输入名字搜(走 Apple 播客目录),或粘贴小宇宙链接直接打开频道</p>
+                <p>输入名字搜(走 Apple 播客目录),或粘贴小宇宙链接 / 任意 RSS 地址</p>
+                <div className="xzr-presets">
+                  {FEED_PRESETS.map((preset) => (
+                    <button
+                      key={preset.feed}
+                      type="button"
+                      className="xzr-preset"
+                      onClick={() => {
+                        setSearchQ(preset.feed)
+                        runSearch(preset.feed)
+                      }}
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>
@@ -1019,6 +1066,10 @@ const STYLES = `
 .xzr-ch-done{color:var(--dsw-alias-state-business-primary)!important}
 .xzr-ch-actions{display:flex;align-items:center;gap:8px;flex:none}
 .xzr-ch-search{min-width:170px}
+.xzr-presets{display:flex;gap:8px;justify-content:center;margin-top:10px}
+.xzr-preset{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);
+  padding:4px 12px;border-radius:999px;font-size:12px;cursor:pointer}
+.xzr-preset:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .xzr-search-hero{display:flex;gap:8px;margin:8px 14px 10px}
 .xzr-search-hero input{flex:1;min-width:0;height:32px;padding:0 10px;border-radius:var(--dsw-radius-sm);
   border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px}

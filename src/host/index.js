@@ -59,6 +59,8 @@ const FAVORITE_ITEM_FIELDS = [
   ['url', 600],
   ['appleId', 40],
   ['logo', 600],
+  ['feedUrl', 800],
+  ['siteUrl', 800],
 ]
 const SESSION_ROOT = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'sessions')
 const SESSION_SCAN_LIMIT = 400
@@ -66,7 +68,7 @@ const SESSION_SCAN_LIMIT = 400
  * 图片反代:浏览器经 Tailscale 访问时,第三方 CDN(Apple/喜马拉雅/小宇宙)常常
  * 直连不到或很慢;由宿主把它们抓回来再发给浏览器,只需要能连通 DSH 本身。
  */
-const IMAGE_HOST_SUFFIXES = ['xyzcdn.net', 'mzstatic.com', 'xmcdn.com', 'xiaoyuzhoufm.com']
+const IMAGE_HOST_SUFFIXES = ['xyzcdn.net', 'mzstatic.com', 'xmcdn.com', 'xiaoyuzhoufm.com', 'transistorcdn.com']
 const IMAGE_TTL_MS = 24 * 60 * 60 * 1000
 const IMAGE_MAX_BYTES = 6 * 1024 * 1024
 const IMAGE_MAX_ENTRIES = 120
@@ -89,14 +91,16 @@ function clampInt(value, fallback, min, max) {
   return Math.min(max, Math.max(min, n))
 }
 
-async function fetchText(url, timeoutMs = TIMEOUT_MS) {
+async function fetchText(url, timeoutMs = TIMEOUT_MS, maxBytes = 24 * 1024 * 1024) {
   const res = await fetch(url, {
     headers: { 'user-agent': UA, accept: '*/*' },
     signal: AbortSignal.timeout(timeoutMs),
     redirect: 'follow',
   })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
-  return res.text()
+  const buffer = Buffer.from(await res.arrayBuffer())
+  if (buffer.length > maxBytes) throw new Error(`内容超过 ${Math.round(maxBytes / 1024 / 1024)}MB`)
+  return buffer.toString('utf8')
 }
 
 function isAllowedImageUrl(raw) {
@@ -180,6 +184,22 @@ function parseDuration(raw) {
   const parts = text.split(':').map((n) => Number.parseInt(n, 10)).filter(Number.isFinite)
   if (parts.length === 0) return 0
   return parts.reduce((acc, part) => acc * 60 + part, 0)
+}
+
+function parseFeedMeta(xml) {
+  const head = xml.slice(0, Math.max(0, xml.indexOf('<item')))
+  const image =
+    /<itunes:image[^>]*href="([^"]+)"/i.exec(head)?.[1] ??
+    /<image>[\s\S]*?<url>([^<]+)<\/url>/i.exec(head)?.[1] ??
+    ''
+  const siteUrl = tagValue(head, 'link')
+  return {
+    title: tagValue(head, 'title'),
+    author: tagValue(head, 'itunes:author') || tagValue(head, 'author'),
+    description: tagValue(head, 'description').slice(0, 300),
+    logo: image,
+    siteUrl,
+  }
 }
 
 function parseFeed(xml, limit) {
@@ -751,6 +771,48 @@ export function apply(ctx, config = {}) {
     })
   }
 
+  function assertHttpUrl(raw) {
+    let url
+    try {
+      url = new URL(String(raw ?? ''))
+    } catch {
+      throw new Error('不是合法的 URL')
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('只支持 http(s) 地址')
+    return url.toString()
+  }
+
+  /** 直接按 RSS 地址打开频道(Acquired 这类非小宇宙、非中国区目录的播客走这条) */
+  async function loadChannelByFeed(feedUrl, limit) {
+    const url = assertHttpUrl(feedUrl)
+    return cached(`feedurl:${url}`, FEED_TTL_MS, async () => {
+      const xml = await fetchText(url, 30_000)
+      const meta = parseFeedMeta(xml)
+      const parsed = parseFeed(xml, MAX_EPISODES)
+      if (parsed.episodes.length === 0) throw new Error('RSS 里没有解析到单集')
+      return {
+        source: 'feed',
+        feedUrl: url,
+        siteUrl: meta.siteUrl,
+        title: meta.title || parsed.channelTitle,
+        author: meta.author,
+        logo: meta.logo,
+        episodes: parsed.episodes.slice(0, limit),
+      }
+    })
+  }
+
+  /** 只看 RSS 的频道信息,给搜索框解析用 */
+  async function resolveFeed(feedUrl) {
+    const url = assertHttpUrl(feedUrl)
+    return cached(`feedmeta:${url}`, FEED_TTL_MS, async () => {
+      const xml = await fetchText(url, 30_000)
+      const meta = parseFeedMeta(xml)
+      const episodes = (xml.match(/<item\b/g) ?? []).length
+      return { feedUrl: url, ...meta, episodes }
+    })
+  }
+
   async function loadChannel(podcastId, appleId, limit) {
     // 优先走 RSS:能拿到完整历史(小宇宙托管的节目 feed 在 feed.xyzfm.space)
     if (appleId) {
@@ -871,9 +933,14 @@ export function apply(ctx, config = {}) {
           const url = new URL(req.url ?? '/x-hot/channel', 'http://localhost')
           const id = (url.searchParams.get('id') ?? '').trim()
           const apple = (url.searchParams.get('apple') ?? '').trim()
+          const feed = (url.searchParams.get('feed') ?? '').trim()
           const limit = clampInt(url.searchParams.get('limit'), MAX_EPISODES, 1, MAX_EPISODES)
+          if (feed) {
+            const data = await loadChannelByFeed(feed, limit)
+            return sendJson(res, 200, { ok: true, ...data })
+          }
           if (!/^[0-9a-f]{24}$/i.test(id) && !/^\d+$/.test(apple)) {
-            return sendJson(res, 400, { ok: false, error: 'id 必须是 24 位小宇宙播客 id,apple 必须是数字 id' })
+            return sendJson(res, 400, { ok: false, error: 'id 必须是 24 位小宇宙播客 id,apple 必须是数字 id，或者用 feed=<RSS 地址>' })
           }
           const data = await loadChannel(id, apple, limit)
           return sendJson(res, 200, { ok: true, ...data })
@@ -988,6 +1055,24 @@ export function apply(ctx, config = {}) {
         } catch (error) {
           log.warn?.(`xiaoyuzhou-hot: search ${error?.message ?? error}`)
           return sendJson(res, 502, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    }),
+  )
+
+  disposers.push(
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/x-hot/resolve-feed',
+      handler: async (req, res) => {
+        if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        try {
+          const url = new URL(req.url ?? '/x-hot/resolve-feed', 'http://localhost')
+          const feed = await resolveFeed(url.searchParams.get('url') ?? '')
+          return sendJson(res, 200, { ok: true, podcast: feed })
+        } catch (error) {
+          log.warn?.(`xiaoyuzhou-hot: resolve-feed ${error?.message ?? error}`)
+          return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
         }
       },
     }),

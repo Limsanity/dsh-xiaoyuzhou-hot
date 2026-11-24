@@ -60,9 +60,14 @@ export function ChannelView({ podcast, data, loading, error, onBack, onRetry, su
               {isFavorite ? '★ 已收藏' : '☆ 收藏'}
             </button>
           ) : null}
-          {podcast?.url ? (
-            <button type="button" className="xzr-refresh" onClick={() => openExternal(podcast.url)} aria-label="在小宇宙打开这个播客">
-              小宇宙 ↗
+          {podcast?.url || podcast?.siteUrl ? (
+            <button
+              type="button"
+              className="xzr-refresh"
+              onClick={() => openExternal(podcast.url || podcast.siteUrl)}
+              aria-label="在浏览器打开这个播客"
+            >
+              {String(podcast.url || '').includes('xiaoyuzhoufm') ? '小宇宙 ↗' : '官网 ↗'}
             </button>
           ) : null}
         </div>

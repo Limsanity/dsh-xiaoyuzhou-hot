@@ -25,12 +25,12 @@ export function buildSummaryPrompt(episode) {
     lines.push(
       '流程：先读单集页的 shownotes 拿时间轴和嘉宾信息（打不开就跳过这一步）；',
       '音频用上面的直链直接下载，再用 mlx-whisper 转写',
-      '（二进制 ~/.venvs/mlxwhisper/bin/mlx_whisper，模型 mlx-community/whisper-large-v3-turbo）；',
+      '（二进制 ~/.venvs/mlxwhisper/bin/mlx_whisper，模型 mlx-community/whisper-large-v3-turbo；英文播客加 --language en）；',
     )
   } else {
     lines.push(
       '流程：先读单集页的 shownotes 拿时间轴和嘉宾信息；再按页面里的音频做转写',
-      '（mlx-whisper，二进制 ~/.venvs/mlxwhisper/bin/mlx_whisper，模型 mlx-community/whisper-large-v3-turbo）；',
+      '（mlx-whisper，二进制 ~/.venvs/mlxwhisper/bin/mlx_whisper，模型 mlx-community/whisper-large-v3-turbo；英文播客加 --language en，不确定就让它自动检测）；',
     )
   }
   lines.push(

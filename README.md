@@ -118,7 +118,7 @@ node scripts/rebuild-library.mjs             # 写回(会话 id 一起带上)
 
 ```
 $DSH_HOME/xiaoyuzhou-hot/favorites.json
-{ "version": 1, "items": [ { key: <播客 id>, title, author, genre, url, appleId, logo, at } ] }
+{ "version": 1, "items": [ { key, title, author, genre, url, appleId, logo, feedUrl, siteUrl, at } ] }
 ```
 
 - 频道页右上角 `☆ 收藏` / `★ 已收藏` 切换;
@@ -139,6 +139,7 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 
 榜单只有 8k 档,想找没上榜的频道有两条路(都在 `搜索` tab 里):
 
+0. **任意 RSS**:搜索框直接粘 RSS 地址(如 Acquired 的 `https://feeds.transistor.fm/acquired`),或点空状态里的 `Acquired` 预设——这类播客不在小宇宙、也不在中国区 Apple 目录里,只能靠 feed。
 1. **关键词搜**:走 Apple Podcasts 目录(`itunes.apple.com/search?entity=podcast&country=CN`),返回 `appleId`,点一下就能用它的 RSS 打开频道、直接总结;右侧 `☆` 可以顺手收藏。
 2. **粘贴小宇宙链接**:播客页、单集页、或一串 24 位 id 都行。宿主会去读页面 SSR,解析出 `pid` 再打开——这条路的频道带「在小宇宙」链接。
 
@@ -154,7 +155,7 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 所以客户端不再直连 CDN,而是走宿主的 `/x-hot/img?url=…`:宿主(能上网)抓回来再发给浏览器,
 浏览器只需要能连通 DSH 本身。
 
-- 白名单:`*.xyzcdn.net`、`*.mzstatic.com`、`*.xmcdn.com`、`*.xiaoyuzhoufm.com`(其余 400,挡 SSRF);
+- 白名单:`*.xyzcdn.net`、`*.mzstatic.com`、`*.xmcdn.com`、`*.xiaoyuzhoufm.com`、`*.transistorcdn.com`(其余 400,挡 SSRF);
 - 只接受 `image/*`、单张上限 6MB;宿主内存缓存 120 张 / 24h,响应带 `max-age=86400`;
 - 客户端加载失败会自动回落到原始 URL(所以宿主没重启、路由还不存在时图也不会消失)。
 
@@ -185,6 +186,8 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | `GET /x-hot/img?url=<编码后的图片地址>` | 图片反代(白名单内) |
 | `GET /x-hot/search?q=<关键词>&limit=1..50` | Apple 播客目录搜索(中国区) |
 | `GET /x-hot/resolve?url=<小宇宙链接或 24 位 id>` | 解析出 `{pid,title,author,episodes,logo,url}` |
+| `GET /x-hot/resolve-feed?url=<RSS 地址>` | 解析 RSS 频道信息 `{feedUrl,title,author,logo,siteUrl,episodes}` |
+| `GET /x-hot/channel?feed=<RSS 地址>&limit=1..300` | 直接按 RSS 拉分集(`source=feed`) |
 
 ## 频道页从哪拿分集
 

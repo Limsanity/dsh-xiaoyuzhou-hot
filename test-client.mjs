@@ -31,6 +31,14 @@ const RELINK_SESSION = 'feed0000-1111-4222-8333-444444444444'
   writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(line + '\n')))
 }
 {
+  // 质检样例:正文齐全,直接关联好 sessionId
+  const summary = '## 这期讲什么\n一期用于测试质检的样例。\n\n## 分段总结\n\n### 第一段\n' + '这一段用来测试分段总结的排版与字数。'.repeat(40)
+  const line = JSON.stringify({ type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: summary }] } } })
+  const dir = join(process.env.DSH_HOME, 'sessions', '--tmp--', 'session-check-1')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(line + '\n')))
+}
+{
   // 一个"当时没抓到 id"的总结会话,正文只用于标题匹配
   // 用固定标题,别依赖榜单当前的第一条(榜单每小时都在变)
   const prompt = '总结《测试播客》固定标题单集\n\n播客：测试播客\n'
@@ -233,7 +241,7 @@ const call = sessionCalls.at(-1)
 const prompt = call?.options?.prompt ?? ''
 console.log('top-episode click -> sessionCalls:', sessionCalls.length, '| clearPreviousDraft:', call?.options?.clearPreviousDraft, '| promptLen:', prompt.length)
 if (!prompt.includes(firstTitle)) throw new Error('prompt missing episode title')
-if (!prompt.includes('xiaoyuzhoufm.com/episode/')) throw new Error('prompt missing episode url')
+if (!/单集页：https?:\/\//.test(prompt)) throw new Error('prompt missing episode url')
 
 const ext = container.querySelector('.xzr-ext')
 await click(ext)
@@ -296,6 +304,11 @@ await fetch('/x-hot/library', {
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ key: 'seed-fixed', title: '固定标题单集', podcast: '测试播客' }),
 })
+await fetch('/x-hot/library', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ key: 'seed-check', title: '质检样例', podcast: '测试播客', sessionId: 'session-check-1', at: Date.now() - 1000 }),
+})
 const relinkBtn = container.querySelector('.xzr-linkbtn')
 if (!relinkBtn) throw new Error('relink button missing')
 await click(relinkBtn)
@@ -306,7 +319,7 @@ console.log('linked rows after relink:', linkedRows.length)
 if (linkedRows.length < 2) throw new Error('relink did not attach the second entry')
 // ---- 质检:从会话里取正文打分 ----
 const targetRow = [...container.querySelectorAll('.xzr-root:not(.xzr-channel) .xzr-row')].find((row) =>
-  row.textContent.includes('鲁豫对话刘索拉'),
+  row.textContent.includes('质检样例'),
 )
 const checkBtn = targetRow?.closest('li')?.querySelector('.xzr-ext-check')
 if (!checkBtn) throw new Error('check button missing on the linked row')
@@ -379,5 +392,21 @@ await act(async () => {
 await click(container.querySelector('.xzr-search-hero button'))
 await tick(4000)
 console.log('resolve -> channel:', container.querySelector('.xzr-ch-title')?.textContent, '| link:', container.querySelector('.xzr-ch-actions .xzr-refresh') ? 'yes' : 'no')
+
+// 直连 RSS:Acquired(不在小宇宙、也不在中国区目录)
+await click(container.querySelector('.xzr-back'))
+await tick(500)
+const feedInput = container.querySelector('.xzr-search-hero input')
+if (!feedInput) throw new Error('search input missing')
+await act(async () => {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+  setter.call(feedInput, 'https://feeds.transistor.fm/acquired')
+  feedInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+})
+await click(container.querySelector('.xzr-search-hero button'))
+await tick(7000)
+console.log('feed channel:', container.querySelector('.xzr-ch-title')?.textContent, '| episodes:', container.querySelectorAll('.xzr-channel .xzr-row').length, '| link:', container.querySelector('.xzr-ch-actions .xzr-refresh')?.textContent)
+if (!container.querySelector('.xzr-ch-head')) throw new Error('feed channel did not open')
+writeFileSync(new URL('./preview-feed.html', import.meta.url), shell(bodyOf(), '小宇宙热榜 · RSS 频道'))
 
 console.log('preview written: preview.html / preview-episodes.html / preview-channel.html / preview-library.html / preview-favorites.html / preview-search.html')
