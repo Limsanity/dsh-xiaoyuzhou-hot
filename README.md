@@ -172,6 +172,7 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | `too-many-sections` | 小节 >6 个 | 0.4 |
 | `ungrounded-numbers` | 一句话堆 3 个以上数字、全文无来源词累计 ≥5 个 | 0.6 |
 | `timecode-flood` | 时间码 >8 个 | 0.3 |
+| `transliterated-names` | 出现 ≥2 处「外文人名音译」（如 伯尼·马库斯） | 0.3 |
 | `boilerplate-opener` | 「全场最…」式总起句 ≥2 次 | 0.3 |
 | `quote-ownership` | 有引号但没标原话/概括 | 0.3 |
 | `too-short` / `too-long` | <800 字 / >4000 字 | 0.3 |

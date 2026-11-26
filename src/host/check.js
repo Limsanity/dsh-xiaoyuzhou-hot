@@ -111,6 +111,19 @@ export function checkSummary(raw) {
     })
   }
 
+  // 先去掉括号内容:允许「Bernie Marcus（伯尼·马库斯）」这种 gloss
+  const withoutGloss = text.replace(/（[^）]*）|\([^)]*\)/g, '')
+  const transliterated = withoutGloss.match(/[\u4e00-\u9fa5]{1,4}·[\u4e00-\u9fa5]{1,8}/g) ?? []
+  if (transliterated.length >= 2) {
+    issues.push({
+      level: 'low',
+      deduction: 0.3,
+      code: 'transliterated-names',
+      message: `疑似把外文人名音译成中文（${transliterated.slice(0, 2).join('、')} 等 ${transliterated.length} 处）`,
+      evidence: '人名/公司名保留原文,首次出现可加中文说明',
+    })
+  }
+
   if (timecodes > 8) {
     issues.push({
       level: 'low',
