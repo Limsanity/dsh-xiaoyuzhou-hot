@@ -167,7 +167,7 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 |---|---|---|
 | `process-log` | 开头是转写参数/会话 id/「以下是总结」 | 1.2 |
 | `forbidden-sections` | 出现「金句 / 边界 / 我的判断 / 打折扣」等附加章节 | 0.5/个(上限 1.0) |
-| `long-paragraph` | 单段 > 300 字 | 0.3/段(上限 0.9) |
+| `long-paragraph` | 单段 > 400 字（只看扫读，不限总字数） | 0.3/段(上限 0.9) |
 | `bullet-heavy` | 一半以上正文是列表（分段总结该是连贯段落） | 0.4 |
 | `too-many-sections` | 小节 >6 个 | 0.4 |
 | `ungrounded-numbers` | 一句话堆 3 个以上数字、全文无来源词累计 ≥5 个 | 0.6 |
@@ -175,7 +175,6 @@ $DSH_HOME/xiaoyuzhou-hot/favorites.json
 | `transliterated-names` | 出现 ≥2 处「外文人名音译」（如 伯尼·马库斯） | 0.3 |
 | `boilerplate-opener` | 「全场最…」式总起句 ≥2 次 | 0.3 |
 | `quote-ownership` | 有引号但没标原话/概括 | 0.3 |
-| `too-short` / `too-long` | <800 字 / >4000 字 | 0.3 |
 
 规则分两批:一批来自 5 篇总结的独立评审(工序日志、数字无锚、段落过长),另一批来自"读完觉得零散"的反馈(小节过多、清单化)。**它不做内容对错判断**,只抓"交付形态"问题——所以措辞写的是"规则自检",不要当事实核查。
 

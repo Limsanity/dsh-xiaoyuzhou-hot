@@ -52,13 +52,13 @@ export function checkSummary(raw) {
     })
   }
 
-  const longParas = paras.filter((p) => p.length > 300 && !p.startsWith('#') && !p.startsWith('|'))
+  const longParas = paras.filter((p) => p.length > 400 && !p.startsWith('#') && !p.startsWith('|'))
   if (longParas.length > 0) {
     issues.push({
       level: 'mid',
       deduction: Math.min(0.9, longParas.length * 0.3),
       code: 'long-paragraph',
-      message: `${longParas.length} 个段落超过 300 字，扫读会卡`,
+      message: `${longParas.length} 个段落超过 400 字，扫读会卡`,
       evidence: `${(longParas[0].match(/^.{0,30}/)?.[0] ?? '')}…（${longParas[0].length} 字）`,
     })
   }
@@ -157,12 +157,6 @@ export function checkSummary(raw) {
       code: 'no-timestamps',
       message: '数字不少但几乎没有时间码，无法回听核对',
     })
-  }
-
-  if (chars < 800) {
-    issues.push({ level: 'low', deduction: 0.3, code: 'too-short', message: `只有 ${chars} 字，信息量可能不够` })
-  } else if (chars > 4000) {
-    issues.push({ level: 'low', deduction: 0.3, code: 'too-long', message: `${chars} 字偏长，读者很难一次读完` })
   }
 
   if (quotes > 0 && !/(原话|他提到|她说|我说)/.test(text)) {
